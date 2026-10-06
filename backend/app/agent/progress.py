@@ -7,6 +7,7 @@ any dashboard section that is already complete.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -58,6 +59,7 @@ class ProgressTracker:
         self.session_id = session_id
         self.state = initial_progress(company)
         self._last_flush = 0.0
+        self._trailing: asyncio.TimerHandle | None = None
 
     # ------------------------------------------------------------------ steps
     def _step(self, key: str) -> dict[str, Any]:
@@ -130,9 +132,26 @@ class ProgressTracker:
     def flush(self, force: bool = False) -> None:
         now = time.monotonic()
         if not force and now - self._last_flush < 0.25:
+            self._schedule_trailing_flush()
             return
         self._last_flush = now
         self.store.update(self.session_id, progress=self.state)
+
+    def _schedule_trailing_flush(self) -> None:
+        """Make sure a throttled update is still written shortly afterwards."""
+        if self._trailing is not None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.store.update(self.session_id, progress=self.state)
+            return
+
+        def run() -> None:
+            self._trailing = None
+            self.flush(force=True)
+
+        self._trailing = loop.call_later(0.3, run)
 
 
 class ResultBuilder:

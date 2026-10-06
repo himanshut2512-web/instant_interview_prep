@@ -127,11 +127,13 @@ class ClaudeLLM:
         except anthropic.BadRequestError as exc:
             if "betas" not in params:
                 raise
-            log.warning("Claude rejected an optional beta feature (%s); retrying without it.", _short(exc))
+            plain = {k: v for k, v in params.items() if k not in _OPTIONAL_KEYS}
+            # If the plain request fails too, the 400 had another cause - keep the betas for later calls.
+            message = await self._consume(plain, on_block)
+            log.warning("Claude rejected an optional beta feature (%s); continuing without it.", _short(exc))
             self._fallbacks = False
             self._progress_updates = False
-            plain = {k: v for k, v in params.items() if k not in _OPTIONAL_KEYS}
-            return await self._consume(plain, on_block)
+            return message
 
     async def _consume(self, params: dict[str, Any], on_block: Callable[[Any], Any] | None) -> Any:
         async with self.client.beta.messages.stream(**params) as stream:

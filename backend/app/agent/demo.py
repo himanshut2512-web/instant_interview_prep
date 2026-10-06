@@ -102,26 +102,41 @@ def pick_items(section: str, selected: list[dict[str, Any]], ctx: PrepContext) -
         if len(chosen) >= target:
             break
         chosen.append(item)
-    # Keep the 🔥 label meaningful: at most ~40% of a section, favouring higher-priority topics (chosen order).
-    allowed = round(HOT_SHARE * len(chosen))
-    for item in chosen:
-        if item.get("hot"):
-            if allowed > 0:
-                allowed -= 1
-            else:
-                item["hot"], item["hot_reason"] = False, ""
+    # Keep the 🔥 label meaningful: at most ~40% of each level, favouring higher-priority topics (chosen order).
+    for level in LEVELS:
+        in_level = [item for item in chosen if item["level"] == level]
+        allowed = round(HOT_SHARE * len(in_level))
+        for item in in_level:
+            if item.get("hot"):
+                if allowed > 0:
+                    allowed -= 1
+                else:
+                    item["hot"], item["hot_reason"] = False, ""
     order = {level: i for i, level in enumerate(LEVELS)}
     chosen.sort(key=lambda i: order[i["level"]])
     return normalize_items(section, chosen, origin="kb")
 
 
 def _resume_lines(resume: str) -> list[str]:
-    lines = []
-    for line in resume.splitlines():
-        clean = line.strip().lstrip("-•*·").strip()
-        if 25 <= len(clean) <= 260:
-            lines.append(clean)
-    return lines
+    """Resume lines with wrapped bullet continuations joined back onto their bullet."""
+    merged: list[str] = []
+    for raw in resume.splitlines():
+        clean = raw.strip()
+        if not clean:
+            continue
+        is_bullet = clean[:1] in "-•*·"
+        text = clean.lstrip("-•*·").strip()
+        if merged and not is_bullet and text[:1].islower() and not merged[-1].endswith((".", ":")):
+            merged[-1] = f"{merged[-1]} {text}"
+        else:
+            merged.append(text)
+    return [line for line in merged if 25 <= len(line) <= 400]
+
+
+def _clip(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
 
 
 ACTION_VERBS = (
@@ -199,7 +214,7 @@ def build_profile(ctx: PrepContext) -> dict[str, Any]:
     strengths = []
     for skill in matched[:5]:
         evidence = _line_for_skill(lines, skill)
-        strengths.append(f"{skill} - your resume shows it: \"{evidence[:150]}\"" if evidence else
+        strengths.append(f"{skill} - your resume shows it: \"{_clip(evidence, 150)}\"" if evidence else
                          f"{skill} - required by the JD and present on your resume; prepare a concrete example.")
     if not strengths:
         strengths.append("Transferable experience - map each JD requirement to a project you have done.")
@@ -237,7 +252,7 @@ def build_profile(ctx: PrepContext) -> dict[str, Any]:
     )
     probes = [
         {
-            "item": line[:160],
+            "item": _clip(line, 170),
             "likely_questions": [
                 "Walk me through this end to end - what was your exact role?",
                 "How did you measure the impact, and how confident are you in that number?",
