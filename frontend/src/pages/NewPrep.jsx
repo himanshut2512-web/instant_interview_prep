@@ -364,7 +364,7 @@ export default function NewPrep() {
               <Info size={18} />
               <span>
                 AI mode: Claude ({health.model}) {health.web_search ? 'with live web research' : 'without web search'}. A
-                standard kit usually takes 3-6 minutes; sections unlock as they finish.
+                standard kit takes a few minutes; sections unlock as they finish.
               </span>
             </div>
           )}

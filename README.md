@@ -117,7 +117,7 @@ ANTHROPIC_API_KEY=sk-ant-... docker compose up --build    # omit the key for dem
 | Hot questions | Questions reported online for the company + very common staples | Classic, frequently asked staples |
 | Generate more | New content, with an optional focus | Unused knowledge-base content |
 | Answer feedback | Claude grades your answer and rewrites an improved version | Keyword coverage scoring against the key points |
-| Time for a standard kit | About 3-6 minutes (sections appear progressively) | A few seconds |
+| Time for a standard kit | A few minutes, depending on model, effort and rate limits (sections appear progressively) | A few seconds |
 
 The demo knowledge base covers Python, SQL, Statistics and A/B testing, Machine Learning, Deep Learning, NLP and GenAI,
 Data Engineering, Cloud and MLOps, BI, DSA, System Design, Case Studies and Guesstimates, and Behavioural/HR.
