@@ -32,9 +32,9 @@ function QuestionSection({ title, items, render }) {
           <div key={level}>
             <h3>{LEVEL_LABEL[level]}</h3>
             {group.map((item, n) => (
-              <div key={item.id} className="card card-flat" style={{ marginBottom: 12 }}>
+              <div key={item.id} className="print-q">
                 <strong>
-                  Q{n + 1}. {item.question} {item.hot ? '🔥' : ''}
+                  Q{n + 1}. {item.question} {item.hot ? '(hot)' : ''}
                 </strong>
                 <div className="subtle">
                   {item.topic}
@@ -59,7 +59,13 @@ export default function PrintView() {
     api.getSession(id).then(setSession).catch((e) => setError(e.message))
   }, [id])
 
-  if (error) return <main className="page"><div className="banner error">{error}</div></main>
+  if (error) {
+    return (
+      <main className="print-page">
+        <div className="banner-note error">{error}</div>
+      </main>
+    )
+  }
   if (!session) {
     return (
       <div className="center-loader">
@@ -72,7 +78,7 @@ export default function PrintView() {
   const company = r.company || {}
 
   return (
-    <main className="page" style={{ maxWidth: 900 }}>
+    <main className="print-page">
       <div className="row no-print" style={{ marginBottom: 18 }}>
         <Link className="btn" to={`/prep/${id}`}>
           <ArrowLeft size={16} /> Back to dashboards
@@ -93,7 +99,7 @@ export default function PrintView() {
         <section>
           <h2>Tell me about yourself</h2>
           <p className="pitch">{profile.elevator_pitch}</p>
-          <div className="two-col">
+          <div className="duo">
             <div>
               <h3>Strengths</h3>
               <Bullets items={profile.strengths} />
@@ -112,7 +118,7 @@ export default function PrintView() {
           <ol>
             {company.interview_rounds.map((rd, i) => (
               <li key={i}>
-                <strong>{rd.name}</strong> ({rd.format}) - {rd.what_they_test}
+                <strong>{rd.name}</strong> ({rd.format}): {rd.what_they_test}
                 {rd.tips ? ` Tip: ${rd.tips}` : ''}
               </li>
             ))}
@@ -163,7 +169,11 @@ export default function PrintView() {
         render={(q) => (
           <>
             <Markdown>{q.answer_md}</Markdown>
-            {q.interview_tip && <p><strong>In the interview:</strong> {q.interview_tip}</p>}
+            {q.interview_tip && (
+              <p>
+                <strong>In the interview:</strong> {q.interview_tip}
+              </p>
+            )}
           </>
         )}
       />
@@ -175,7 +185,11 @@ export default function PrintView() {
             <Markdown>{q.context}</Markdown>
             <Markdown>{q.solution_md}</Markdown>
             <Markdown>{codeFence(q.code)}</Markdown>
-            {q.complexity && <p><strong>Complexity:</strong> {q.complexity}</p>}
+            {q.complexity && (
+              <p>
+                <strong>Complexity:</strong> {q.complexity}
+              </p>
+            )}
           </>
         )}
       />
@@ -188,7 +202,7 @@ export default function PrintView() {
             <ol>
               {(q.approach_steps || []).map((s, i) => (
                 <li key={i}>
-                  <strong>{s.step}</strong> - {s.detail}
+                  <strong>{s.step}</strong>: {s.detail}
                 </li>
               ))}
             </ol>
@@ -218,7 +232,7 @@ export default function PrintView() {
           <ol>
             {r.quiz.map((q) => (
               <li key={q.id}>
-                <strong>{KEYS[q.correct_index]}</strong> - {q.explanation}
+                <strong>{KEYS[q.correct_index]}</strong>: {q.explanation}
               </li>
             ))}
           </ol>

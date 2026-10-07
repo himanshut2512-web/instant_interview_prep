@@ -38,7 +38,7 @@ const PRIORITY_VALUE = { high: 3, medium: 2, low: 1 }
 export function PriorityTag({ priority }) {
   const label = { high: 'High priority', medium: 'Medium', low: 'Low' }[priority] || priority
   return (
-    <span className={`chip ${priority === 'high' ? 'chip-accent' : ''}`}>
+    <span className={`chip ${priority === 'high' ? 'chip-sec' : ''}`}>
       <OrdinalGlyph value={PRIORITY_VALUE[priority] || 2} />
       {label}
     </span>
@@ -47,7 +47,7 @@ export function PriorityTag({ priority }) {
 
 export function NewBadge() {
   return (
-    <span className="chip chip-accent" title="Generated on demand">
+    <span className="chip chip-brand" title="Generated on demand">
       <Sparkles size={12} />
       New
     </span>

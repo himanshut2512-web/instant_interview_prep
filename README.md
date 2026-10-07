@@ -23,6 +23,8 @@ Everything is dynamic: the content is generated from your inputs, and every dash
 questions (by level, topic and an optional focus). You can also:
 
 - **Practice mode**: hide the model answers, type your own, and get it scored out of 10 with specific feedback
+- **Drill mode**: go through any question bank one card at a time (Space to reveal, ← / → to move, M to mark
+  mastered, R for review later), and flip the revision key concepts as flashcards
 - **Track progress**: mark questions *mastered* or *review later*, mark topics revised, and see readiness meters
 - **Export**: download the whole kit as Markdown, or open a print view to save it as a PDF
 - Keep a history of prep kits, switch between light and dark themes, and use it on mobile
@@ -179,8 +181,10 @@ backend/
     parsing.py, storage.py, models.py, export.py, samples.py
   tests/                    pytest suite (API, units, AI pipeline with a fake Claude client)
 frontend/
-  src/pages/                NewPrep, Workspace, Overview, Revision, QuestionBank, Quiz, History, PrintView
-  src/components/           question cards, practice panel, filters, agent progress, charts…
+  src/pages/                Landing, NewPrep, Workspace, Overview, Revision, QuestionBank, Quiz, History, PrintView
+  src/components/           question cards, drill deck, practice panel, filters, agent progress, charts, dialogs…
+  src/styles/               design tokens (light/dark, a colour identity per dashboard) and per-area stylesheets
+  src/hooks/, src/lib/      session polling, scroll helpers, motion presets, progress and formatting helpers
 scripts/                    dev.sh / dev.ps1
 Dockerfile, docker-compose.yml
 ```
@@ -195,7 +199,8 @@ pytest            # 55 tests; the AI pipeline is tested with a fake Claude clien
 
 ## Demo script for the hackathon
 
-1. Open the app, click **Try a sample** (or paste your own resume and JD), then **Build my prep kit**.
+1. Open the app and click **Try a live sample** on the landing page (or **Build my prep kit** to use your own resume
+   and JD), then **Build my prep kit** on the form.
 2. Show the **live agent log**: searches, pages read and sources appear as the agent researches the company.
 3. Open **Overview** while the rest generates: the pitch, the gaps, the interview rounds and the topic priority (click
    a bar to jump to its revision notes).
