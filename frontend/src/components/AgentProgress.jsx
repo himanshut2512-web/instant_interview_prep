@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { motion } from 'motion/react'
 import {
+  ArrowRight,
   Check,
   CircleAlert,
   CircleCheck,
@@ -16,7 +18,7 @@ import {
   X,
 } from 'lucide-react'
 import { EASE } from '../lib/motion.js'
-import { ProgressRing } from './Viz.jsx'
+import { Meter, ProgressRing } from './Viz.jsx'
 
 const LOG_ICONS = {
   search: Search,
@@ -175,5 +177,55 @@ export default function AgentProgress({ session, onRetry, onDismiss }) {
       </div>
       <TerminalLog logs={progress.logs || []} sources={progress.sources || []} live={active} />
     </motion.section>
+  )
+}
+
+/**
+ * One-line status shown on the other dashboards while the agent is still
+ * working (or after it failed); the full panel and log live on the Overview.
+ */
+export function AgentStrip({ session, overviewTo }) {
+  const progress = session.progress || {}
+  const steps = progress.steps || []
+  const failed = session.status === 'failed'
+  const done = steps.filter((s) => s.status === 'done').length
+  const current = steps.find((s) => s.status === 'running')
+
+  return (
+    <motion.div
+      className={`agent-strip no-print ${failed ? 'failed' : ''}`}
+      role={failed ? 'alert' : 'status'}
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      transition={{ duration: 0.3, ease: EASE }}
+    >
+      <span className="strip-icon" aria-hidden="true">
+        {failed ? <CircleAlert size={16} /> : <LoaderCircle size={16} className="spin" />}
+      </span>
+      <div className="strip-text" title={failed ? undefined : current?.label}>
+        <strong>{failed ? 'Generation stopped' : 'Agent working'}</strong>
+        {failed ? (
+          <span>{session.error || 'Something went wrong. Anything already generated is still available.'}</span>
+        ) : (
+          <span>
+            {current
+              ? `Step ${Math.min(done + 1, steps.length)} of ${steps.length} · ${current.label}`
+              : steps.length > 0
+                ? `${done} of ${steps.length} steps done`
+                : 'Starting up…'}
+          </span>
+        )}
+      </div>
+      {!failed && (
+        <div className="strip-meter">
+          <Meter value={progress.percent ?? 0} max={100} label="Generation progress" />
+          <span>{progress.percent ?? 0}%</span>
+        </div>
+      )}
+      <Link className="btn btn-sm strip-link" to={overviewTo}>
+        {failed ? 'Details & retry' : 'Watch live'} <ArrowRight size={14} />
+      </Link>
+    </motion.div>
   )
 }

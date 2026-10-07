@@ -29,6 +29,118 @@
   pointer-events: none;
 }
 
+/* slim status strip on the non-overview dashboards while the agent works */
+.agent-strip {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(120px, 200px) auto;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 10px 12px 10px 14px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--line));
+  box-shadow: var(--shadow-sm);
+}
+
+/* a soft sheen sweeps across while work is in progress */
+.agent-strip:not(.failed)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--brand) 9%, transparent) 50%, transparent 70%);
+  background-size: 250% 100%;
+  animation: shimmer 2.6s linear infinite;
+  pointer-events: none;
+}
+
+.agent-strip > * {
+  position: relative;
+  z-index: 1;
+}
+
+.strip-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+.strip-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13.5px;
+}
+
+.strip-text strong {
+  flex: none;
+  font-weight: 700;
+}
+
+.strip-text span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ink-2);
+}
+
+.strip-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+
+.strip-meter .meter {
+  flex: 1;
+  height: 6px;
+}
+
+.strip-link {
+  white-space: nowrap;
+}
+
+.agent-strip.failed {
+  border-color: color-mix(in srgb, var(--bad) 45%, var(--line));
+  background: color-mix(in srgb, var(--bad-soft) 55%, var(--surface));
+}
+
+.agent-strip.failed .strip-icon {
+  background: var(--bad-soft);
+  color: var(--bad-ink);
+}
+
+@media (max-width: 640px) {
+  .agent-strip {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px 12px;
+  }
+
+  .strip-text {
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .strip-text span {
+    max-width: 100%;
+  }
+
+  .strip-meter {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
 .agent-card.success {
   border-color: color-mix(in srgb, var(--ok) 45%, var(--line));
 }

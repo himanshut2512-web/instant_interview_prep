@@ -21,7 +21,7 @@ import { useSession } from '../hooks/useSession.js'
 import { computeProgress } from '../lib/progress.js'
 import { avatarStyle, initials, timeAgo } from '../lib/format.js'
 import { EASE } from '../lib/motion.js'
-import AgentProgress from '../components/AgentProgress.jsx'
+import AgentProgress, { AgentStrip } from '../components/AgentProgress.jsx'
 import { ModeBadge } from '../components/Badges.jsx'
 import { Meter } from '../components/Viz.jsx'
 import { EmptyState } from '../components/UI.jsx'
@@ -92,14 +92,37 @@ export default function Workspace() {
   const { session, error } = ws
   const [justFinished, setJustFinished] = useState(false)
   const wasActive = useRef(false)
+  const seenReady = useRef(false)
   const liveStatus = session?.status
+  const overviewTo = `/prep/${id}`
+  const onOverview = location.pathname.replace(/\/+$/, '') === overviewTo
 
+  // When a run completes, the "Prep kit ready" summary is shown once, on the
+  // Overview. Finishing elsewhere gets a toast instead, and the summary waits
+  // for the next Overview visit.
   useEffect(() => {
     const isActive = liveStatus === 'queued' || liveStatus === 'running'
-    if (wasActive.current && liveStatus === 'completed') setJustFinished(true)
+    if (wasActive.current && liveStatus === 'completed') {
+      setJustFinished(true)
+      if (!onOverview) {
+        const summary = session?.summary || {}
+        notify(`Your prep kit is ready: ${summary.questions ?? 0} questions across ${summary.topics ?? 0} topics.`)
+      }
+    }
     if (isActive) setJustFinished(false)
     wasActive.current = isActive
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to status changes only
   }, [liveStatus])
+
+  // Once seen on the Overview, the summary goes away when you leave it.
+  useEffect(() => {
+    if (!justFinished) {
+      seenReady.current = false
+      return
+    }
+    if (onOverview) seenReady.current = true
+    else if (seenReady.current) setJustFinished(false)
+  }, [justFinished, onOverview])
 
   useEffect(() => {
     window.scrollTo({ top: 0 })
@@ -128,7 +151,9 @@ export default function Workspace() {
   const result = session.result || {}
   const ready = new Set(session.progress?.sections_ready || [])
   const active = session.status === 'queued' || session.status === 'running'
-  const showProgress = active || session.status === 'failed' || justFinished
+  const failed = session.status === 'failed'
+  const showPanel = onOverview && (active || failed || justFinished)
+  const showStrip = !onOverview && (active || failed)
   const hasContent = (key) => (key === 'overview' ? (result.topics || []).length > 0 : (result[key] || []).length > 0)
   const count = (key) => (key === 'overview' ? null : (result[key] || []).length)
 
@@ -245,7 +270,8 @@ export default function Workspace() {
             <KitMenu id={id} onDelete={remove} />
           </div>
 
-          {showProgress && <AgentProgress session={session} onRetry={retry} onDismiss={() => setJustFinished(false)} />}
+          {showPanel && <AgentProgress session={session} onRetry={retry} onDismiss={() => setJustFinished(false)} />}
+          <AnimatePresence>{showStrip && <AgentStrip key="strip" session={session} overviewTo={overviewTo} />}</AnimatePresence>
 
           <motion.div key={location.pathname} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: EASE }}>
             <Routes>

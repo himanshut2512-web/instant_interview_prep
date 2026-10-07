@@ -407,6 +407,7 @@
     border: 1px solid var(--line);
     background: var(--surface);
     box-shadow: var(--shadow-sm);
+    margin-bottom: 14px;
   }
 
   .ws-tabbar {
