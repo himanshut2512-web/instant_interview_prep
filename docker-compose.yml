@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # leave empty for offline demo mode
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - PREP_CLAUDE_MODEL=${PREP_CLAUDE_MODEL:-claude-opus-5-5}
+      - PREP_CLAUDE_EFFORT=${PREP_CLAUDE_EFFORT:-medium}
+    volumes:
+      - prep-data:/app/data
+
+volumes:
+  prep-data:
