@@ -109,8 +109,9 @@ def check_smtp(s: Settings, send_to: str | None = None) -> tuple[bool, str]:
     except smtplib.SMTPAuthenticationError as exc:
         hint = ""
         if "gmail" in (s.smtp_host or "").lower():
-            hint = (" For Gmail, the password must be a 16-letter App Password "
-                    f"({APP_PASSWORDS_PAGE}), not your normal Google password.")
+            hint = (f" Gmail didn't accept this app password for {s.smtp_user}. Create a new one at "
+                    f"{APP_PASSWORDS_PAGE} while signed in as {s.smtp_user} (check the account in the "
+                    "top-right corner) and paste it exactly.")
         return False, f"the mail server rejected the username or password (code {exc.smtp_code}).{hint}"
     except (smtplib.SMTPException, OSError) as exc:
         return False, f"couldn't send through {s.smtp_host}:{s.smtp_port}: {exc!r}"
@@ -221,6 +222,10 @@ def _setup_email(s: Settings) -> dict[str, str]:
             if _yes("Open the App Passwords page now?"):
                 _open(APP_PASSWORDS_PAGE)
             password = _ask("App password (hidden while you paste)", secret=True).replace(" ", "")
+            if not re.fullmatch(r"[A-Za-z]{16}", password):
+                print(f"  That was {len(password)} characters; a Gmail app password is 16 letters.")
+                print("  In PowerShell paste with a right-click (Ctrl+V may not paste into hidden input).")
+                continue
             candidate = dataclasses.replace(
                 s, smtp_host="smtp.gmail.com", smtp_port=587, smtp_security="starttls",
                 smtp_user=address, smtp_password=password, smtp_from=f"InstantInterviewPrep <{address}>",

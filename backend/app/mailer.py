@@ -36,7 +36,14 @@ def open_smtp(s: Settings, timeout: float = 20) -> smtplib.SMTP:
             password = s.smtp_password
             if "gmail.com" in (s.smtp_host or "").lower():
                 password = password.replace(" ", "")  # Google shows app passwords in groups of four
-            server.login(s.smtp_user, password)
+            server.ehlo_or_helo_if_needed()
+            if "PLAIN" in server.esmtp_features.get("auth", "").upper().split():
+                # one attempt, so a rejected password surfaces as 535 instead of the
+                # disconnect Gmail answers to smtplib's retry with another method
+                server.user, server.password = s.smtp_user, password
+                server.auth("PLAIN", server.auth_plain)
+            else:
+                server.login(s.smtp_user, password)
     except BaseException:
         server.close()
         raise

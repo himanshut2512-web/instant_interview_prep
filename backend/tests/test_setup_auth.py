@@ -55,8 +55,19 @@ class FakeSMTP:
         self.host, self.port, self.sent, self.logged_in = host, port, [], None
         FakeSMTP.instances.append(self)
 
+    esmtp_features = {"auth": "LOGIN PLAIN"}
+
     def starttls(self, context=None):
         self.tls = True
+
+    def ehlo_or_helo_if_needed(self):
+        pass
+
+    def auth_plain(self, challenge=None):
+        return ""
+
+    def auth(self, mechanism, authobject, *, initial_response_ok=True):
+        self.login(self.user, self.password)
 
     def login(self, user, password):
         if password != "abcdefghijklmnop":
