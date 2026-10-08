@@ -113,7 +113,7 @@ def test_check_smtp_signs_in_and_sends(monkeypatch, settings):
 def test_check_smtp_explains_a_rejected_gmail_password(monkeypatch, settings):
     monkeypatch.setattr(mailer_module.smtplib, "SMTP", FakeSMTP)
     ok, message = check_smtp(gmail(settings, "my-normal-password"))
-    assert not ok and "535" in message and "App Password" in message
+    assert not ok and "535" in message and "app password" in message
 
 
 def test_update_env_changes_only_the_given_keys(tmp_path):
