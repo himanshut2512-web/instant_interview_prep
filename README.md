@@ -25,6 +25,8 @@ questions (by level, topic and an optional focus). You can also:
 - **Practice mode**: hide the model answers, type your own, and get it scored out of 10 with specific feedback
 - **Drill mode**: go through any question bank one card at a time (Space to reveal, ← / → to move, M to mark
   mastered, R for review later), and flip the revision key concepts as flashcards
+- **Accounts**: sign up with first name, last name, email and password, or continue with Google; every prep kit is
+  private to its owner, with "forgot password" by email
 - **Track progress**: mark questions *mastered* or *review later*, mark topics revised, and see readiness meters
 - **Export**: download the whole kit as Markdown, or open a print view to save it as a PDF
 - Keep a history of prep kits, switch between light and dark themes, and use it on mobile
@@ -124,6 +126,55 @@ ANTHROPIC_API_KEY=sk-ant-... docker compose up --build    # omit the key for dem
 The demo knowledge base covers Python, SQL, Statistics and A/B testing, Machine Learning, Deep Learning, NLP and GenAI,
 Data Engineering, Cloud and MLOps, BI, DSA, System Design, Case Studies and Guesstimates, and Behavioural/HR.
 
+## Accounts and sign-in
+
+Visitors who aren't signed in land on the sign-in page. Accounts live in the app's own database, so there is no
+third-party auth service to pay for:
+
+- **Email and password**: passwords are hashed with Argon2id; sessions are random tokens in an httpOnly,
+  SameSite=Lax cookie (stored hashed on the server), lasting 30 days with "Keep me signed in" or until the browser
+  closes without it. Sign-in, sign-up and reset requests are rate-limited, and state-changing API calls from other
+  sites are refused.
+- **Continue with Google**: the standard OAuth 2.0 authorization-code flow with PKCE, state and nonce. Google's ID
+  token is verified on the server. If an account with the same verified email exists, Google is linked to it.
+- **Forgot password**: a single-use link valid for 60 minutes is emailed; using it signs you out on other devices.
+- **Your data**: each prep kit belongs to the account that created it. Kits made before accounts existed are given to
+  the first account created.
+
+### Set up "Continue with Google" (free, about 5 minutes)
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/), create a project (or pick one).
+2. **APIs & Services → OAuth consent screen**: choose *External*, fill in the app name and support email, and keep
+   the default scopes (`openid`, `email`, `profile`). While the app is in *Testing*, only the test users you add can
+   sign in; click **Publish app** when you go live (these basic scopes need no Google review).
+3. **APIs & Services → Credentials → Create credentials → OAuth client ID**, type *Web application*. Under
+   **Authorized redirect URIs** add:
+   - `http://localhost:5173/api/auth/google/callback` (development with `npm run dev`)
+   - `http://localhost:8000/api/auth/google/callback` (the built app served by FastAPI)
+   - `https://YOUR-DOMAIN/api/auth/google/callback` (production)
+4. Copy the client ID and secret into `backend/.env` as `PREP_GOOGLE_CLIENT_ID` and `PREP_GOOGLE_CLIENT_SECRET`,
+   then restart the backend.
+
+### Set up password-reset email (free)
+
+Any SMTP provider works. The quickest free option is Gmail (about 500 emails a day):
+
+1. Turn on 2-Step Verification for the Google account, then create an App Password at
+   <https://myaccount.google.com/apppasswords>.
+2. In `backend/.env` set `PREP_SMTP_HOST=smtp.gmail.com`, `PREP_SMTP_USER=you@gmail.com`,
+   `PREP_SMTP_PASSWORD=<the 16-character app password>` and `PREP_SMTP_FROM="InstantInterviewPrep <you@gmail.com>"`.
+3. Check it: `cd backend && python -m app.mailer you@example.com` sends a test email and explains common errors.
+
+For a custom sender domain, Brevo's free plan (300 emails a day) works the same way with
+`PREP_SMTP_HOST=smtp-relay.brevo.com`. Without SMTP settings, reset links are written to the server log instead.
+
+### Production checklist
+
+- Set `PREP_APP_URL=https://your-domain` (reset links and the Google callback use it; cookies become HTTPS-only).
+- Serve the app over HTTPS behind your proxy and run uvicorn with `--proxy-headers`.
+- Add the production redirect URI to the Google OAuth client and publish the consent screen.
+- Configure SMTP and run the `python -m app.mailer` check once.
+
 ## Configuration (`backend/.env`)
 
 | Variable | Default | Purpose |
@@ -139,6 +190,11 @@ Data Engineering, Cloud and MLOps, BI, DSA, System Design, Case Studies and Gues
 | `PREP_DEMO_STEP_DELAY` | `0.6` | Seconds between demo steps (so the agent timeline is visible) |
 | `PREP_DATA_DIR` | `backend/data` | Where the SQLite database lives |
 | `PREP_MAX_UPLOAD_MB` | `10` | Upload size limit per file |
+| `PREP_APP_URL` | *(empty)* | Public URL of the site; required in production |
+| `PREP_GOOGLE_CLIENT_ID`, `PREP_GOOGLE_CLIENT_SECRET` | *(empty)* | Enable "Continue with Google" |
+| `PREP_SMTP_HOST`, `PREP_SMTP_PORT`, `PREP_SMTP_SECURITY`, `PREP_SMTP_USER`, `PREP_SMTP_PASSWORD`, `PREP_SMTP_FROM` | `587`, `starttls` | Email for password resets |
+| `PREP_COOKIE_SECURE` | automatic | HTTPS-only cookies (on when `PREP_APP_URL` is https) |
+| `PREP_SESSION_DAYS` | `30` | How long "Keep me signed in" lasts |
 
 The new-prep form also has a checkbox to run a single kit in demo mode when a key is set.
 
@@ -146,10 +202,13 @@ The new-prep form also has a checkbox to run a single kit in demo mode when a ke
 
 | Method & path | Description |
 |---|---|
+| `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` | Accounts (session cookie) |
+| `GET /api/auth/google/start`, `GET /api/auth/google/callback` | Continue with Google (OAuth 2.0 + PKCE) |
+| `POST /api/auth/forgot-password`, `GET`/`POST /api/auth/reset-password` | Password reset by email |
 | `GET /api/health` | Mode (ai/demo), model, web-search flag, counts per depth |
 | `GET /api/sample` | Sample inputs (fictional candidate) for "Try a sample" |
 | `POST /api/sessions` | Multipart form: `company`, `years_experience`, `resume_file` or `resume_text`, `jd_file` or `job_description`, optional `role`, `extra_notes`, `extra_files[]`, `depth`, `mode` |
-| `GET /api/sessions` | List prep kits |
+| `GET /api/sessions` | List your prep kits (every `/api/sessions` route needs a signed-in user) |
 | `GET /api/sessions/{id}` | Full kit: content, progress, user state, quiz attempts |
 | `GET /api/sessions/{id}/status` | Lightweight progress for polling (steps, live log, sources, ready sections) |
 | `POST /api/sessions/{id}/generate` | `{section, count, level, topic, focus}`: generate more questions or a new revision topic |
@@ -178,10 +237,14 @@ backend/
       actions.py            generate-more and answer evaluation
       demo.py               offline demo agent (knowledge base + heuristic profile and feedback)
     knowledge_base/         13 offline topics (revision notes + questions at three levels)
+    auth.py, accounts.py    sign-up/sign-in, Google OAuth, password reset, sessions
+    mailer.py, ratelimit.py SMTP email (python -m app.mailer to test) and sign-in rate limits
     parsing.py, storage.py, models.py, export.py, samples.py
-  tests/                    pytest suite (API, units, AI pipeline with a fake Claude client)
+  tests/                    pytest suite (API, accounts, units, AI pipeline with a fake Claude client)
 frontend/
-  src/pages/                Landing, NewPrep, Workspace, Overview, Revision, QuestionBank, Quiz, History, PrintView
+  src/pages/                AuthPage (sign in/up, reset), Landing, NewPrep, Workspace, Overview, Revision,
+                            QuestionBank, Quiz, History, PrintView
+  src/auth.jsx              signed-in state and route guards
   src/components/           question cards, drill deck, practice panel, filters, agent progress, charts, dialogs…
   src/styles/               design tokens (light/dark, a colour identity per dashboard) and per-area stylesheets
   src/hooks/, src/lib/      session polling, scroll helpers, motion presets, progress and formatting helpers
@@ -194,12 +257,12 @@ Dockerfile, docker-compose.yml
 ```bash
 cd backend
 pip install -r requirements-dev.txt
-pytest            # 55 tests; the AI pipeline is tested with a fake Claude client (no key or network needed)
+pytest            # 82 tests; the AI pipeline and Google sign-in use fakes (no key or network needed)
 ```
 
 ## Demo script for the hackathon
 
-1. Open the app and click **Try a live sample** on the landing page (or **Build my prep kit** to use your own resume
+1. Sign in (or create an account), then click **Try a live sample** on the landing page (or **Build my prep kit** to use your own resume
    and JD), then **Build my prep kit** on the form.
 2. Show the **live agent log**: searches, pages read and sources appear as the agent researches the company.
 3. Open **Overview** while the rest generates: the pitch, the gaps, the interview rounds and the topic priority (click
@@ -211,8 +274,8 @@ pytest            # 55 tests; the AI pipeline is tested with a fake Claude clien
 
 ## Notes
 
-- **Privacy:** everything is stored locally in SQLite (`backend/data/prep.db`). In AI mode, your resume, JD and notes
-  are sent to the Anthropic API to generate the kit.
+- **Privacy:** everything is stored in SQLite on your server (`backend/data/prep.db`) and each kit is visible only
+  to its owner. In AI mode, your resume, JD and notes are sent to the Anthropic API to generate the kit.
 - **Research quality** depends on what has been publicly reported about the company. The agent is instructed never
   to attribute a question to a source that didn't contain it, and it labels research that comes from model knowledge.
 - **Cost and time** scale with depth, model and effort. For faster, cheaper kits, use `PREP_CLAUDE_EFFORT=low` or

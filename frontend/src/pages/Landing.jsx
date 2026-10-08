@@ -94,7 +94,7 @@ const FAQS = [
   },
   {
     q: 'Is my resume stored?',
-    a: 'Kits are saved in a local SQLite database on the server you run. In AI mode, your resume, JD and notes are sent to the Anthropic API to generate the kit.',
+    a: 'Kits are saved in a SQLite database on the server you run and are visible only to your account. In AI mode, your resume, JD and notes are sent to the Anthropic API to generate the kit.',
   },
 ]
 
@@ -344,7 +344,7 @@ export default function Landing() {
               </motion.div>
               <motion.ul className="hero-points" variants={fadeUp}>
                 <li>
-                  <Check size={15} /> No sign-up
+                  <Check size={15} /> Private to your account
                 </li>
                 <li>
                   <Check size={15} /> Ready in minutes

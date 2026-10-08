@@ -36,6 +36,11 @@ def _int(name: str, default: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, value))
 
 
+def _text(name: str) -> str | None:
+    value = (os.getenv(name) or "").strip()
+    return value or None
+
+
 def _effort(name: str, default: str) -> str:
     value = (os.getenv(name) or default).strip().lower()
     return value if value in EFFORT_LEVELS else default
@@ -56,10 +61,30 @@ class Settings:
     frontend_dist: Path
     cors_origins: tuple[str, ...]
     max_upload_mb: int
+    # --- accounts ---------------------------------------------------------
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    app_url: str | None = None  # public URL used in emails, e.g. https://prep.example.com
+    cookie_secure: bool | None = None  # None: secure whenever the request came over HTTPS
+    session_days: int = 30
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    smtp_security: str = "starttls"  # starttls | ssl | none
 
     @property
     def ai_enabled(self) -> bool:
         return bool(self.anthropic_api_key) and not self.force_demo
+
+    @property
+    def google_enabled(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret)
+
+    @property
+    def email_enabled(self) -> bool:
+        return bool(self.smtp_host and (self.smtp_from or self.smtp_user))
 
 
 @lru_cache
@@ -84,4 +109,15 @@ def get_settings() -> Settings:
         frontend_dist=Path(os.getenv("PREP_FRONTEND_DIST") or (PROJECT_DIR / "frontend" / "dist")),
         cors_origins=tuple(o.strip() for o in cors.split(",") if o.strip()),
         max_upload_mb=_int("PREP_MAX_UPLOAD_MB", 10, 1, 50),
+        google_client_id=_text("PREP_GOOGLE_CLIENT_ID"),
+        google_client_secret=_text("PREP_GOOGLE_CLIENT_SECRET"),
+        app_url=(_text("PREP_APP_URL") or "").rstrip("/") or None,
+        cookie_secure=None if _text("PREP_COOKIE_SECURE") is None else _bool("PREP_COOKIE_SECURE", True),
+        session_days=_int("PREP_SESSION_DAYS", 30, 1, 365),
+        smtp_host=_text("PREP_SMTP_HOST"),
+        smtp_port=_int("PREP_SMTP_PORT", 587, 1, 65535),
+        smtp_user=_text("PREP_SMTP_USER"),
+        smtp_password=_text("PREP_SMTP_PASSWORD"),
+        smtp_from=_text("PREP_SMTP_FROM"),
+        smtp_security=(_text("PREP_SMTP_SECURITY") or "starttls").lower(),
     )

@@ -1,8 +1,9 @@
-"""Tiny SQLite persistence layer for prep sessions.
+"""Tiny SQLite persistence layer for prep sessions (and the account tables).
 
 Each session is one row. Large/nested parts (inputs, progress, generated
 content, user progress, quiz attempts) are stored as JSON text columns so the
-schema stays flexible while the content model evolves.
+schema stays flexible while the content model evolves. Every session belongs to
+the user who created it (user_id); account data lives in app/accounts.py.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 JSON_COLUMNS = ("inputs", "progress", "result", "user_state", "quiz_attempts", "warnings", "summary")
-SCALAR_COLUMNS = ("status", "mode", "company", "role", "years", "depth", "error")
+SCALAR_COLUMNS = ("user_id", "status", "mode", "company", "role", "years", "depth", "error")
 ALL_COLUMNS = SCALAR_COLUMNS + JSON_COLUMNS
 
 _SCHEMA = """
@@ -39,6 +40,50 @@ CREATE TABLE IF NOT EXISTS sessions (
     summary       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS users (
+    id              TEXT PRIMARY KEY,
+    email           TEXT NOT NULL UNIQUE,
+    first_name      TEXT NOT NULL,
+    last_name       TEXT NOT NULL,
+    password_hash   TEXT,
+    google_sub      TEXT UNIQUE,
+    avatar_url      TEXT,
+    email_verified  INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    last_login_at   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    token_hash    TEXT PRIMARY KEY,
+    user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at    TEXT NOT NULL,
+    expires_at    TEXT NOT NULL,
+    last_seen_at  TEXT NOT NULL,
+    persistent    INTEGER NOT NULL DEFAULT 1,
+    user_agent    TEXT,
+    ip            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
+
+CREATE TABLE IF NOT EXISTS password_resets (
+    token_hash  TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL,
+    used_at     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS oauth_states (
+    state_hash     TEXT PRIMARY KEY,
+    code_verifier  TEXT NOT NULL,
+    nonce          TEXT NOT NULL,
+    next_path      TEXT,
+    remember       INTEGER NOT NULL DEFAULT 1,
+    created_at     TEXT NOT NULL,
+    expires_at     TEXT NOT NULL
+);
 """
 
 
@@ -57,8 +102,34 @@ class Store:
         with self._lock:
             if str(path) != ":memory:":
                 self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(_SCHEMA)
+            self._migrate()
             self._conn.commit()
+
+    def _migrate(self) -> None:
+        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(sessions)")}
+        if "user_id" not in columns:  # databases created before accounts existed
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT")
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, created_at DESC)")
+
+    # ------------------------------------------------------------- raw access
+    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> int:
+        """Run one write statement and commit; returns the affected row count."""
+        with self._lock:
+            cur = self._conn.execute(sql, params)
+            self._conn.commit()
+        return cur.rowcount
+
+    def fetch_one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(sql, params).fetchone()
+        return dict(row) if row is not None else None
+
+    def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------ helpers
     @staticmethod
@@ -117,14 +188,18 @@ class Store:
             )
             self._conn.commit()
 
-    def list(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list(self, user_id: str, limit: int = 100) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, created_at, updated_at, status, mode, company, role, years, depth, error, summary "
-                "FROM sessions ORDER BY created_at DESC LIMIT ?",
-                (limit,),
+                "FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                (user_id, limit),
             ).fetchall()
         return [self._decode(r) for r in rows]
+
+    def adopt_unowned(self, user_id: str) -> int:
+        """Give prep kits created before accounts existed to the given user."""
+        return self.execute("UPDATE sessions SET user_id = ? WHERE user_id IS NULL", (user_id,))
 
     def delete(self, session_id: str) -> bool:
         with self._lock:

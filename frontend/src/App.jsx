@@ -1,14 +1,16 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { Link, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { Compass, Home, Zap } from 'lucide-react'
-import { AppProvider } from './context.jsx'
+import { AppProvider, useApp } from './context.jsx'
+import { AuthProvider, GuestOnly, RequireAuth, useAuth } from './auth.jsx'
 import TopBar from './components/TopBar.jsx'
 import Landing from './pages/Landing.jsx'
+import AuthPage from './pages/AuthPage.jsx'
 import { EmptyState } from './components/UI.jsx'
 import { Page } from './components/Motion.jsx'
 
-// The landing page loads instantly; the app screens (and the Markdown/code
-// highlighting they need) load on demand.
+// Sign-in and the home page load instantly; the app screens (and the
+// Markdown/code highlighting they need) load on demand.
 const NewPrep = lazy(() => import('./pages/NewPrep.jsx'))
 const History = lazy(() => import('./pages/History.jsx'))
 const Workspace = lazy(() => import('./pages/Workspace.jsx'))
@@ -56,14 +58,83 @@ function NotFound() {
   )
 }
 
-export default function App() {
+/** After Google sign-in the server adds ?welcome=new|back: greet once, then drop it from the URL. */
+function WelcomeNotice() {
+  const { user } = useAuth()
+  const { notify } = useApp()
+  const location = useLocation()
+  const navigate = useNavigate()
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const welcome = params.get('welcome')
+    if (!welcome || !user) return
+    notify(welcome === 'new' ? `Welcome, ${user.first_name}! Let's build your first prep kit.` : `Welcome back, ${user.first_name}.`)
+    params.delete('welcome')
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : '', hash: location.hash }, { replace: true })
+  }, [location, user, notify, navigate])
+  return null
+}
+
+/** Signed-in screens: top bar + page. */
+function AppShell() {
   return (
-    <AppProvider>
-      <ScrollManager />
+    <>
+      <WelcomeNotice />
       <TopBar />
       <div className="app-main">
         <Suspense fallback={<Loader />}>
-          <Routes>
+          <Outlet />
+        </Suspense>
+      </div>
+    </>
+  )
+}
+
+export default function App() {
+  return (
+    <AppProvider>
+      <AuthProvider>
+        <ScrollManager />
+        <Routes>
+          <Route
+            path="/login"
+            element={
+              <GuestOnly>
+                <AuthPage view="signin" />
+              </GuestOnly>
+            }
+          />
+          <Route
+            path="/signup"
+            element={
+              <GuestOnly>
+                <AuthPage view="signup" />
+              </GuestOnly>
+            }
+          />
+          <Route
+            path="/forgot-password"
+            element={
+              <GuestOnly>
+                <AuthPage view="forgot" />
+              </GuestOnly>
+            }
+          />
+          <Route
+            path="/reset-password"
+            element={
+              <GuestOnly allowSignedIn>
+                <AuthPage view="reset" />
+              </GuestOnly>
+            }
+          />
+          <Route
+            element={
+              <RequireAuth>
+                <AppShell />
+              </RequireAuth>
+            }
+          >
             <Route path="/" element={<Landing />} />
             <Route
               path="/new"
@@ -84,9 +155,9 @@ export default function App() {
             <Route path="/prep/:id/print" element={<PrintView />} />
             <Route path="/prep/:id/*" element={<Workspace />} />
             <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
-      </div>
+          </Route>
+        </Routes>
+      </AuthProvider>
     </AppProvider>
   )
 }
