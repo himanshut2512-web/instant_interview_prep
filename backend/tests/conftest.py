@@ -7,13 +7,15 @@ from pathlib import Path
 import pytest
 
 # Configure the environment before app.main (which builds a default app) is imported.
+# Never read the developer's backend/.env: it may hold real API keys and mail credentials.
+os.environ["PREP_ENV_FILE"] = ""
 _TMP = Path(tempfile.mkdtemp(prefix="prep-tests-"))
 os.environ["PREP_DATA_DIR"] = str(_TMP)
 os.environ["PREP_DEMO_STEP_DELAY"] = "0"
 os.environ.pop("ANTHROPIC_API_KEY", None)
 os.environ["PREP_FRONTEND_DIST"] = str(_TMP / "no-frontend")
-for _name in ("PREP_GOOGLE_CLIENT_ID", "PREP_GOOGLE_CLIENT_SECRET", "PREP_SMTP_HOST", "PREP_APP_URL",
-              "PREP_COOKIE_SECURE"):
+for _name in ("PREP_GOOGLE_CLIENT_ID", "PREP_GOOGLE_CLIENT_SECRET", "PREP_SMTP_HOST", "PREP_SMTP_USER",
+              "PREP_SMTP_PASSWORD", "PREP_SMTP_FROM", "PREP_APP_URL", "PREP_COOKIE_SECURE"):
     os.environ.pop(_name, None)
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -30,6 +32,7 @@ class FakeMailer:
     """Captures outgoing email instead of sending it."""
 
     configured = True
+    sender_address = "noreply@example.com"
 
     def __init__(self):
         self.sent = []

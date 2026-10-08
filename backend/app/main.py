@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import __version__
-from .accounts import AccountError, Accounts
+from .accounts import AccountError, Accounts, PasswordServiceBusy
 from .agent import actions
 from .agent.llm import ClaudeLLM, LLMError
 from .agent.pipeline import friendly_error, run_session
@@ -180,6 +180,15 @@ def create_app(
     @app.exception_handler(AccountError)
     async def account_error(_: Request, exc: AccountError) -> JSONResponse:
         return JSONResponse({"detail": str(exc), "field": exc.field}, status_code=exc.status)
+
+    @app.exception_handler(PasswordServiceBusy)
+    async def password_busy(_: Request, exc: PasswordServiceBusy) -> JSONResponse:
+        log.error("Password hashing is short of memory: %s", exc)
+        return JSONResponse(
+            {"detail": "The server is busy right now. Nothing was changed - please try again in a few seconds."},
+            status_code=503,
+            headers={"Retry-After": "5"},
+        )
 
     auth_router, current_user = build_auth(
         settings, accounts, mailer, RateLimiter(), google_exchange or google_code_exchange(settings)

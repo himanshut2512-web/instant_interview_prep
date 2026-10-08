@@ -16,7 +16,10 @@ from dotenv import load_dotenv
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 PROJECT_DIR = BACKEND_DIR.parent
 
-load_dotenv(BACKEND_DIR / ".env")
+# PREP_ENV_FILE points at another settings file; set it empty to read none (the tests do).
+_ENV_FILE = os.getenv("PREP_ENV_FILE", str(BACKEND_DIR / ".env"))
+if _ENV_FILE:
+    load_dotenv(_ENV_FILE)
 
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 

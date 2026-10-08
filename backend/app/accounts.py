@@ -10,13 +10,15 @@ from __future__ import annotations
 import hashlib
 import re
 import secrets
+import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
 from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
+from argon2.exceptions import HashingError, InvalidHashError, VerificationError, VerifyMismatchError
 from email_validator import EmailNotValidError, validate_email
 
 from .storage import Store, utcnow
@@ -29,10 +31,21 @@ OAUTH_STATE_TTL = timedelta(minutes=10)
 SHORT_SESSION_TTL = timedelta(hours=24)  # "keep me signed in" unticked
 SESSION_REFRESH_AFTER = timedelta(days=1)
 
-_hasher = PasswordHasher()  # Argon2id with the library's recommended parameters
+# Argon2id with OWASP's recommended settings: 19 MiB of memory, 2 passes, 1 lane. Hashes made
+# with other settings (e.g. the library default of 64 MiB) still verify and are upgraded on the
+# next successful sign-in (see needs_rehash).
+_hasher = PasswordHasher(time_cost=2, memory_cost=19 * 1024, parallelism=1)
+# Each hash briefly needs that memory; cap how many run at once so a burst of sign-ins can't
+# exhaust the server's memory.
+_hash_slots = threading.BoundedSemaphore(4)
+_MEMORY_ATTEMPTS = 3
 # Verified against when the email is unknown, so response times don't reveal which emails exist.
-_DUMMY_HASH = _hasher.hash(secrets.token_urlsafe(16))
+_dummy_hash: str | None = None
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+class PasswordServiceBusy(Exception):
+    """Hashing ran out of memory even after retrying. Nothing was changed; the request can be retried."""
 
 
 class AccountError(ValueError):
@@ -73,15 +86,42 @@ def check_password(password: str, email: str = "") -> None:
         raise AccountError("Your password can't be your email address.", "password")
 
 
+def _out_of_memory(exc: Exception) -> bool:
+    return not isinstance(exc, VerifyMismatchError) and "memory" in str(exc).lower()
+
+
+def _argon2(work: Callable[[], Any]) -> Any:
+    """Run one Argon2 operation in a free slot, retrying briefly if memory is short."""
+    for attempt in range(_MEMORY_ATTEMPTS):
+        with _hash_slots:
+            try:
+                return work()
+            except (HashingError, VerificationError) as exc:
+                if not _out_of_memory(exc):
+                    raise
+        time.sleep(0.25 * (attempt + 1))
+    raise PasswordServiceBusy("not enough free memory to hash a password")
+
+
 def hash_password(password: str) -> str:
-    return _hasher.hash(password)
+    return _argon2(lambda: _hasher.hash(password))
 
 
 def verify_password(password_hash: str | None, password: str) -> bool:
+    """True only for a correct password. Raises PasswordServiceBusy instead of guessing when
+    memory runs out, so a correct password is never reported as wrong."""
+    global _dummy_hash
+    if password_hash is None:
+        if _dummy_hash is None:
+            _dummy_hash = hash_password(secrets.token_urlsafe(16))
+        target = _dummy_hash
+    else:
+        target = password_hash
     try:
-        return _hasher.verify(password_hash or _DUMMY_HASH, password) and password_hash is not None
-    except (VerifyMismatchError, VerificationError, InvalidHashError):
+        matched = _argon2(lambda: _hasher.verify(target, password))
+    except (VerificationError, InvalidHashError):  # wrong password, or a damaged hash
         return False
+    return bool(matched) and password_hash is not None
 
 
 def needs_rehash(password_hash: str) -> bool:

@@ -14,7 +14,7 @@ export function AuthProvider({ children }) {
   const [status, setStatus] = useState('loading')
   const [landing, setLanding] = useState(null)
   const [signedOutOnPurpose, setSignedOutOnPurpose] = useState(false)
-  const [config, setConfig] = useState({ google_enabled: false, email_delivery: false, setup_hints: false })
+  const [config, setConfig] = useState({ google_enabled: false, email_delivery: false, email_sender: null, setup_hints: false })
 
   // settle both before leaving 'loading', so the sign-in page renders with the right options at once
   useEffect(() => {

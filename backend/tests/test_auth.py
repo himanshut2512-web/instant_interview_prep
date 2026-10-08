@@ -4,10 +4,14 @@ import base64
 import hashlib
 import re
 import sqlite3
+from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlsplit
 
 import pytest
+from argon2 import PasswordHasher
+from argon2.exceptions import HashingError, VerificationError
 
+import app.accounts as accounts
 from app.storage import Store
 from conftest import GOOGLE_CLIENT_ID, PASSWORD, sample_form, signup, wait_for
 
@@ -34,7 +38,12 @@ def test_everything_needs_a_signed_in_user(anon):
     assert anon.get("/api/sessions/abc/export.md").status_code == 401
     # public endpoints stay public
     assert anon.get("/api/health").status_code == 200
-    assert anon.get("/api/auth/config").json() == {"google_enabled": True, "email_delivery": True, "setup_hints": True}
+    assert anon.get("/api/auth/config").json() == {
+        "google_enabled": True,
+        "email_delivery": True,
+        "email_sender": "noreply@example.com",
+        "setup_hints": True,
+    }
 
 
 def test_register_login_logout(anon):
@@ -218,9 +227,22 @@ def test_reset_links_point_at_a_trusted_address(anon, mailer):
 
 
 def test_forgot_password_does_not_reveal_accounts(anon, mailer):
-    response = forgot(anon, "ghost@example.com")
-    assert response.status_code == 202 and response.json() == {"ok": True}
-    assert mailer.sent == []
+    signup(anon)
+    known, unknown = forgot(anon, "ada@example.com"), forgot(anon, "ghost@example.com")
+    # the page gets the same answer either way...
+    assert known.status_code == unknown.status_code == 202 and known.json() == unknown.json() == {"ok": True}
+    # ...and the inbox tells its owner: a reset link, or that there's no account with this address
+    reset, no_account = mailer.sent
+    assert reset["to"] == "ada@example.com" and "/reset-password?token=" in reset["text"]
+    assert no_account["to"] == "ghost@example.com" and "no account with this email" in no_account["text"]
+    assert "/signup?email=ghost%40example.com" in no_account["text"]
+    assert "reset-password" not in no_account["text"]
+
+
+def test_no_account_emails_are_rate_limited(anon, mailer):
+    for _ in range(5):
+        forgot(anon, "stranger@example.com")
+    assert len(mailer.sent) == 3  # at most 3 an hour per address
 
 
 # ------------------------------------------------------------------ Google
@@ -356,3 +378,81 @@ def test_google_needs_configuration(settings, mailer, google):
         assert client.get("/api/auth/config").json()["google_enabled"] is False
         start = client.get("/api/auth/google/start", follow_redirects=False)
         assert start.status_code == 303 and start.headers["location"] == "/login?error=google_unavailable"
+
+
+# ------------------------------------------------- a server short of memory
+class FlakyHasher:
+    """Wraps the real hasher; the next `failures` calls fail the way Argon2 does when memory runs out."""
+
+    def __init__(self, real, failures):
+        self.real, self.failures = real, failures
+
+    def _maybe_fail(self, error):
+        if self.failures > 0:
+            self.failures -= 1
+            raise error("Memory allocation error")
+
+    def hash(self, password):
+        self._maybe_fail(HashingError)
+        return self.real.hash(password)
+
+    def verify(self, password_hash, password):
+        self._maybe_fail(VerificationError)
+        return self.real.verify(password_hash, password)
+
+    def check_needs_rehash(self, password_hash):
+        return self.real.check_needs_rehash(password_hash)
+
+
+@pytest.fixture
+def short_of_memory(monkeypatch):
+    real = accounts._hasher
+    monkeypatch.setattr(accounts, "time", SimpleNamespace(sleep=lambda seconds: None))
+
+    def fail_next(failures):
+        monkeypatch.setattr(accounts, "_hasher", FlakyHasher(real, failures))
+
+    return fail_next
+
+
+def test_password_reset_survives_a_server_short_of_memory(anon, mailer, short_of_memory):
+    signup(anon)
+    anon.cookies.clear()
+    forgot(anon, "ada@example.com")
+    token = reset_link(mailer)
+
+    short_of_memory(99)  # never recovers
+    busy = anon.post("/api/auth/reset-password", json={"token": token, "password": "BrandNew2026"})
+    assert busy.status_code == 503 and "try again" in busy.json()["detail"]
+    # nothing changed: the link still works and the old password still signs in
+    assert anon.get("/api/auth/reset-password", params={"token": token}).json()["valid"] is True
+
+    short_of_memory(2)  # recovers within the retries
+    done = anon.post("/api/auth/reset-password", json={"token": token, "password": "BrandNew2026"})
+    assert done.status_code == 200
+    anon.cookies.clear()
+    assert login(anon, password="BrandNew2026").status_code == 200
+
+
+def test_sign_in_never_mistakes_a_memory_error_for_a_wrong_password(anon, short_of_memory):
+    signup(anon)
+    anon.cookies.clear()
+    short_of_memory(99)
+    for _ in range(10):  # more than the 8 wrong-password attempts that lock an address
+        busy = login(anon)
+        assert busy.status_code == 503 and "Incorrect" not in busy.json()["detail"]
+    short_of_memory(1)
+    assert login(anon).status_code == 200  # not locked out, and a single failure is retried
+
+
+def test_older_password_hashes_are_upgraded_on_sign_in(anon, settings):
+    signup(anon)
+    with sqlite3.connect(settings.db_path) as conn:  # as stored before: the library's 64 MiB default
+        conn.execute("UPDATE users SET password_hash = ?", (PasswordHasher().hash(PASSWORD),))
+    anon.cookies.clear()
+    assert login(anon).status_code == 200
+    with sqlite3.connect(settings.db_path) as conn:
+        upgraded = conn.execute("SELECT password_hash FROM users").fetchone()[0]
+    assert "$m=19456,t=2,p=1$" in upgraded
+    anon.cookies.clear()
+    assert login(anon).status_code == 200

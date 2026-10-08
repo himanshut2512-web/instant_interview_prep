@@ -1251,3 +1251,14 @@
   font: 600 12.5px/1.6 var(--font-mono);
   white-space: nowrap;
 }
+
+.auth-hint {
+  margin: -8px 0 18px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 13.5px;
+  line-height: 1.55;
+}

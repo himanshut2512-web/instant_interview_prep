@@ -33,6 +33,7 @@ from .accounts import (
     AccountError,
     Accounts,
     IssuedSession,
+    PasswordServiceBusy,
     check_password,
     clean_name,
     hash_password,
@@ -42,7 +43,7 @@ from .accounts import (
     verify_password,
 )
 from .config import Settings
-from .mailer import Mailer, reset_email
+from .mailer import Mailer, no_account_email, reset_email
 from .ratelimit import RateLimiter
 
 log = logging.getLogger("prep.auth")
@@ -263,6 +264,8 @@ def build_auth(
         return {
             "google_enabled": settings.google_enabled,
             "email_delivery": mailer.configured,
+            # shown as "look for an email from …"; it's on every email anyway
+            "email_sender": mailer.sender_address if mailer.configured else None,
             # without a public URL this is a local install: the UI may show its owner setup hints
             "setup_hints": settings.app_url is None,
         }
@@ -300,8 +303,11 @@ def build_auth(
                 "Incorrect email or password. If you signed up with Google, use Continue with Google.", None, 401
             )
         limiter.reset(email_key)
-        if needs_rehash(user["password_hash"]):
-            accounts.update_user(user["id"], password_hash=await asyncio.to_thread(hash_password, body.password))
+        if needs_rehash(user["password_hash"]):  # upgrade older hashes; never worth failing a sign-in over
+            try:
+                accounts.update_user(user["id"], password_hash=await asyncio.to_thread(hash_password, body.password))
+            except PasswordServiceBusy:
+                log.warning("Skipped upgrading a password hash: the server is short of memory")
         return signed_in(request, response, user, body.remember)
 
     @router.get("/google/start")
@@ -380,29 +386,38 @@ def build_auth(
         response.delete_cookie(COOKIE_NAME, path="/", httponly=True, samesite="lax")
         return response
 
-    async def send_reset_email(user: dict[str, Any], link: str) -> None:
-        subject, text, html_body = reset_email(user["first_name"], link, int(RESET_TTL.total_seconds() // 60))
+    async def deliver(to: str, message: tuple[str, str, str], what: str) -> None:
+        subject, text, html_body = message
         try:
-            await mailer.send(user["email"], subject, text, html_body)
+            await mailer.send(to, subject, text, html_body)
         except Exception:
-            log.exception("Could not send the password-reset email to user %s", user["id"])
+            log.exception("Could not send the %s email", what)
 
     @router.post("/forgot-password", status_code=202)
     async def forgot_password(body: ForgotBody, request: Request, background: BackgroundTasks) -> dict[str, Any]:
         guard(f"forgot:ip:{client_ip(request)}", 10, 3600)
         email = normalize_email(body.email)
         email_key = f"forgot:email:{email}"
-        # The same answer, in the same time, whether or not the account exists:
-        # the email is sent after the response, so timing can't reveal accounts either.
+        # The same answer, in the same time, whether or not the account exists: the page never
+        # says which, and the email goes out after the response. The inbox tells the owner: a
+        # reset link if the account exists, otherwise a note that there's no account yet.
         if limiter.retry_after(email_key, 3, 3600) == 0:
             limiter.hit(email_key)
             user = accounts.by_email(email)
             base = email_link_base(request)
-            if user is not None and base is None:
-                log.error("Can't build a password-reset link: set PREP_APP_URL to the site's public URL.")
+            if base is None:
+                log.error("Can't build links for emails: set PREP_APP_URL to the site's public URL.")
             elif user is not None:
                 token = accounts.create_reset_token(user["id"])
-                background.add_task(send_reset_email, user, f"{base}/reset-password?token={token}")
+                link = f"{base}/reset-password?token={token}"
+                minutes = int(RESET_TTL.total_seconds() // 60)
+                background.add_task(deliver, user["email"], reset_email(user["first_name"], link, minutes, user["email"]),
+                                    "password-reset")
+            elif limiter.retry_after("forgot:unknown", 30, 3600) == 0:
+                # capped site-wide too, so the form can't be used to mail strangers in bulk
+                limiter.hit("forgot:unknown")
+                signup = f"{base}/signup?{urlencode({'email': email})}"
+                background.add_task(deliver, email, no_account_email(email, signup), "no-account")
         return {"ok": True}
 
     @router.get("/reset-password")
@@ -418,9 +433,11 @@ def build_auth(
         if user is None:
             raise invalid
         check_password(body.password, user["email"])  # a rejected password doesn't use up the link
+        # hash before using up the link: if hashing fails (e.g. the server is short of memory)
+        # the link still works for another try
+        password_hash = await asyncio.to_thread(hash_password, body.password)
         if not accounts.consume_reset_token(body.token):  # single use, even under concurrent requests
             raise invalid
-        password_hash = await asyncio.to_thread(hash_password, body.password)
         accounts.revoke_all_sessions(user["id"])  # sign out everywhere else
         user = accounts.update_user(user["id"], password_hash=password_hash, email_verified=1)
         return signed_in(request, response, user, body.remember)

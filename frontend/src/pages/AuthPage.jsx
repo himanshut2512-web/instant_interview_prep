@@ -470,7 +470,14 @@ function CredentialsView({ view }) {
   const navigate = useNavigate()
   const { config } = useAuth()
   const finish = useFinish()
-  const form = useFormState({ first_name: '', last_name: '', email: '', password: '', remember: true })
+  // ?email= pre-fills the address, e.g. from the "no account yet" email's sign-up link
+  const form = useFormState({
+    first_name: '',
+    last_name: '',
+    email: new URLSearchParams(location.search).get('email') || '',
+    password: '',
+    remember: true,
+  })
   const { values, set, errors, busy, done } = form
   const { setFormError } = form
   const [setupNote, setSetupNote] = useState(null)
@@ -707,8 +714,21 @@ function ForgotView() {
             </span>
             <h2>Check your inbox</h2>
             <p>
-              If an account exists for <strong>{sentTo}</strong>, we’ve sent a link to reset your password. It expires in 60 minutes.
+              We’ve emailed <strong>{sentTo}</strong>. If it has an account, the email has a link to choose a new password
+              (it works for 60 minutes); if not, it tells you how to create one.
             </p>
+            {config.email_delivery && (
+              <p className="auth-hint">
+                It usually arrives within a minute. Not there? Check <strong>Spam</strong> and <strong>Promotions</strong>
+                {config.email_sender ? (
+                  <>
+                    {' '}
+                    for an email from <strong>{config.email_sender}</strong>
+                  </>
+                ) : null}
+                , and mark it “Not spam” so the next one lands in your inbox.
+              </p>
+            )}
             <FormAlert message={emailNote} tone="setup" />
             <button type="button" className="btn btn-block" onClick={send} disabled={busy || cooldown > 0}>
               {busy ? <LoaderCircle size={17} className="spin" /> : <Mail size={17} />}
