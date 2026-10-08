@@ -260,7 +260,12 @@ def build_auth(
     # ------------------------------------------------------------- endpoints
     @router.get("/config")
     async def auth_config() -> dict[str, Any]:
-        return {"google_enabled": settings.google_enabled, "email_delivery": mailer.configured}
+        return {
+            "google_enabled": settings.google_enabled,
+            "email_delivery": mailer.configured,
+            # without a public URL this is a local install: the UI may show its owner setup hints
+            "setup_hints": settings.app_url is None,
+        }
 
     @router.get("/me")
     async def me(response: Response, user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:

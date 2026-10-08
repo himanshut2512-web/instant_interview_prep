@@ -18,12 +18,14 @@ import {
   Lock,
   Mail,
   MailCheck,
+  MailX,
   Moon,
   ShieldCheck,
   Sparkles,
   Sun,
   TriangleAlert,
   UserRound,
+  Wrench,
 } from 'lucide-react'
 import { api } from '../api.js'
 import { nextPath, useAuth } from '../auth.jsx'
@@ -40,6 +42,20 @@ const TITLES = {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// Shown only on a local install (no public URL configured): how its owner turns the feature on.
+const GOOGLE_SETUP_NOTE = (
+  <>
+    <strong>Google sign-in isn’t configured yet.</strong> In the <code>backend</code> folder run{' '}
+    <code>python -m app.setup_auth</code>. It walks you through a free Google OAuth client (about 5 minutes) and checks it.
+  </>
+)
+const EMAIL_SETUP_NOTE = (
+  <>
+    <strong>Email isn’t configured yet</strong>, so reset links are printed in the backend terminal instead of emailed.
+    Run <code>python -m app.setup_auth</code> in the <code>backend</code> folder to send real emails (free with Gmail).
+  </>
+)
 
 // ?error= codes the server sends back after a Google sign-in attempt
 const SIGN_IN_ERRORS = {
@@ -254,7 +270,13 @@ function FormAlert({ message, tone = 'error' }) {
           transition={{ duration: 0.22 }}
         >
           <span className="auth-alert-inner">
-            {tone === 'error' ? <CircleAlert size={17} aria-hidden="true" /> : <ShieldCheck size={17} aria-hidden="true" />}
+            {tone === 'error' ? (
+              <CircleAlert size={17} aria-hidden="true" />
+            ) : tone === 'setup' ? (
+              <Wrench size={17} aria-hidden="true" />
+            ) : (
+              <ShieldCheck size={17} aria-hidden="true" />
+            )}
             <span>{message}</span>
           </span>
         </motion.div>
@@ -451,17 +473,21 @@ function CredentialsView({ view }) {
   const form = useFormState({ first_name: '', last_name: '', email: '', password: '', remember: true })
   const { values, set, errors, busy, done } = form
   const { setFormError } = form
+  const [setupNote, setSetupNote] = useState(null)
   const next = new URLSearchParams(location.search).get('next') || ''
+  // live sites hide Google until it's configured; a local install shows it with a setup note
+  const showGoogle = config.google_enabled || config.setup_hints
 
   // a Google sign-in that didn't complete comes back here with ?error=
   useEffect(() => {
     const params = new URLSearchParams(location.search)
     const code = params.get('error')
     if (!code) return
-    setFormError(SIGN_IN_ERRORS[code] || 'Sign-in didn’t complete. Please try again.')
+    if (code === 'google_unavailable' && config.setup_hints) setSetupNote(GOOGLE_SETUP_NOTE)
+    else setFormError(SIGN_IN_ERRORS[code] || 'Sign-in didn’t complete. Please try again.')
     params.delete('error')
     navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : '' }, { replace: true })
-  }, [location.search, location.pathname, navigate, setFormError])
+  }, [location.search, location.pathname, navigate, setFormError, config.setup_hints])
 
   const succeed = (user, isNew) => {
     form.setDone(true)
@@ -517,6 +543,7 @@ function CredentialsView({ view }) {
 
       <ModeSwitch view={view} search={location.search} />
 
+      <FormAlert message={setupNote} tone="setup" />
       <FormAlert message={form.formError} />
 
       <motion.form className="auth-form" onSubmit={submit} noValidate animate={form.controls}>
@@ -597,16 +624,20 @@ function CredentialsView({ view }) {
         </SubmitButton>
       </motion.form>
 
-      <div className="auth-divider">
-        <span>or</span>
-      </div>
-      <GoogleSignIn
-        label={signup ? 'Sign up with Google' : 'Continue with Google'}
-        next={next}
-        remember={signup || values.remember}
-        enabled={config.google_enabled}
-        onUnavailable={() => setFormError(SIGN_IN_ERRORS.google_unavailable)}
-      />
+      {showGoogle && (
+        <>
+          <div className="auth-divider">
+            <span>or</span>
+          </div>
+          <GoogleSignIn
+            label={signup ? 'Sign up with Google' : 'Continue with Google'}
+            next={next}
+            remember={signup || values.remember}
+            enabled={config.google_enabled}
+            onUnavailable={() => setSetupNote(GOOGLE_SETUP_NOTE)}
+          />
+        </>
+      )}
 
       <p className="auth-alt">
         {signup ? 'Already have an account?' : 'New to InstantInterviewPrep?'}{' '}
@@ -625,6 +656,9 @@ function ForgotView() {
   const { values, set, errors, busy } = form
   const [sentTo, setSentTo] = useState('')
   const [cooldown, setCooldown] = useState(0)
+  // a live site without email can't deliver reset links; a local install prints them in the backend log
+  const unavailable = !config.email_delivery && !config.setup_hints
+  const emailNote = !config.email_delivery && config.setup_hints ? EMAIL_SETUP_NOTE : null
 
   useEffect(() => {
     if (!cooldown) return undefined
@@ -652,7 +686,21 @@ function ForgotView() {
   return (
     <motion.div key="forgot" {...swap}>
       <AnimatePresence mode="wait" initial={false}>
-        {sentTo ? (
+        {unavailable ? (
+          <motion.div key="unavailable" className="auth-state" {...swap}>
+            <span className="state-icon bad">
+              <MailX size={28} />
+            </span>
+            <h2>Password reset is unavailable</h2>
+            <p>
+              This site can’t send email right now, so reset links can’t be delivered. Please try again later
+              {config.google_enabled ? ', or use Continue with Google if your account uses Google.' : '.'}
+            </p>
+            <Link to="/login" className="btn btn-primary btn-lg btn-block">
+              <ArrowLeft size={18} /> Back to sign in
+            </Link>
+          </motion.div>
+        ) : sentTo ? (
           <motion.div key="sent" className="auth-state" {...swap}>
             <span className="state-icon ok">
               <MailCheck size={30} />
@@ -661,9 +709,7 @@ function ForgotView() {
             <p>
               If an account exists for <strong>{sentTo}</strong>, we’ve sent a link to reset your password. It expires in 60 minutes.
             </p>
-            {!config.email_delivery && (
-              <p className="field-note warn center">Email delivery isn’t set up on this server yet, so the link was written to the server log.</p>
-            )}
+            <FormAlert message={emailNote} tone="setup" />
             <button type="button" className="btn btn-block" onClick={send} disabled={busy || cooldown > 0}>
               {busy ? <LoaderCircle size={17} className="spin" /> : <Mail size={17} />}
               {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend the link'}
@@ -681,6 +727,7 @@ function ForgotView() {
               <h2>Forgot your password?</h2>
               <p>Enter the email you use for InstantInterviewPrep and we’ll send you a link to choose a new one.</p>
             </div>
+            <FormAlert message={emailNote} tone="setup" />
             <FormAlert message={form.formError} />
             <motion.form className="auth-form" onSubmit={send} noValidate animate={form.controls}>
               <Field

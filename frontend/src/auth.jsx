@@ -14,18 +14,22 @@ export function AuthProvider({ children }) {
   const [status, setStatus] = useState('loading')
   const [landing, setLanding] = useState(null)
   const [signedOutOnPurpose, setSignedOutOnPurpose] = useState(false)
-  const [config, setConfig] = useState({ google_enabled: false, email_delivery: false })
+  const [config, setConfig] = useState({ google_enabled: false, email_delivery: false, setup_hints: false })
 
+  // settle both before leaving 'loading', so the sign-in page renders with the right options at once
   useEffect(() => {
     let alive = true
-    api
-      .me()
-      .then((body) => alive && (setUser(body.user), setStatus('signed-in')))
-      .catch(() => alive && (setUser(null), setStatus('signed-out')))
-    api
-      .authConfig()
-      .then((body) => alive && setConfig(body))
-      .catch(() => {})
+    Promise.allSettled([api.me(), api.authConfig()]).then(([me, settings]) => {
+      if (!alive) return
+      if (settings.status === 'fulfilled') setConfig(settings.value)
+      if (me.status === 'fulfilled') {
+        setUser(me.value.user)
+        setStatus('signed-in')
+      } else {
+        setUser(null)
+        setStatus('signed-out')
+      }
+    })
     return () => {
       alive = false
     }

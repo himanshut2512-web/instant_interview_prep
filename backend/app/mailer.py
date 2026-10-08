@@ -4,7 +4,7 @@ as Gmail with an app password or Brevo).
 Without SMTP settings, emails are written to the server log instead, so the
 password-reset flow can still be tested locally.
 
-Check the settings with:  python -m app.mailer you@example.com
+Set up or check the settings with:  python -m app.setup_auth
 """
 
 from __future__ import annotations
@@ -14,13 +14,33 @@ import html
 import logging
 import smtplib
 import ssl
-import sys
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 
 from .config import Settings
 
 log = logging.getLogger("prep.mail")
+
+
+def open_smtp(s: Settings, timeout: float = 20) -> smtplib.SMTP:
+    """Connect to the configured SMTP server, switch on TLS and log in. The caller closes it."""
+    context = ssl.create_default_context()
+    if s.smtp_security == "ssl":
+        server: smtplib.SMTP = smtplib.SMTP_SSL(s.smtp_host, s.smtp_port, context=context, timeout=timeout)
+    else:
+        server = smtplib.SMTP(s.smtp_host, s.smtp_port, timeout=timeout)
+    try:
+        if s.smtp_security == "starttls":
+            server.starttls(context=context)
+        if s.smtp_user and s.smtp_password:
+            password = s.smtp_password
+            if "gmail.com" in (s.smtp_host or "").lower():
+                password = password.replace(" ", "")  # Google shows app passwords in groups of four
+            server.login(s.smtp_user, password)
+    except BaseException:
+        server.close()
+        raise
+    return server
 
 
 class Mailer:
@@ -47,19 +67,7 @@ class Mailer:
         message["Message-ID"] = make_msgid(domain=sender.rsplit("@", 1)[-1].strip(">") or None)
         message.set_content(text)
         message.add_alternative(html_body, subtype="html")
-        context = ssl.create_default_context()
-        if s.smtp_security == "ssl":
-            server: smtplib.SMTP = smtplib.SMTP_SSL(s.smtp_host, s.smtp_port, context=context, timeout=20)
-        else:
-            server = smtplib.SMTP(s.smtp_host, s.smtp_port, timeout=20)
-        with server:
-            if s.smtp_security == "starttls":
-                server.starttls(context=context)
-            if s.smtp_user and s.smtp_password:
-                password = s.smtp_password
-                if "gmail.com" in (s.smtp_host or "").lower():
-                    password = password.replace(" ", "")  # Google shows app passwords in groups of four
-                server.login(s.smtp_user, password)
+        with open_smtp(s) as server:
             server.send_message(message)
         log.info("Sent '%s' to %s", subject, to)
 
@@ -95,37 +103,3 @@ If you didn't ask for this, ignore this email - your password stays the same.</p
 <p style="margin:16px 0 0;font-size:12px;color:#8a90a6;word-break:break-all">{href}</p>
 </td></tr></table></td></tr></table></body></html>"""
     return subject, text, body
-
-
-def _main(argv: list[str]) -> int:
-    """Send a test email with the configured settings and explain common failures."""
-    from .config import get_settings
-
-    if len(argv) != 1 or "@" not in argv[0]:
-        print("Usage: python -m app.mailer recipient@example.com")
-        return 2
-    settings = get_settings()
-    mailer = Mailer(settings)
-    if not mailer.configured:
-        print("Email is not configured. Set PREP_SMTP_HOST, PREP_SMTP_USER, PREP_SMTP_PASSWORD and PREP_SMTP_FROM "
-              "in backend/.env (see .env.example).")
-        return 1
-    text = "Your InstantInterviewPrep email settings work: password-reset emails will be delivered."
-    try:
-        mailer._send(argv[0], "InstantInterviewPrep test email", text, f"<p>{html.escape(text)}</p>")
-    except smtplib.SMTPAuthenticationError as exc:
-        print(f"The SMTP server rejected the username or password: {exc.smtp_code} {exc.smtp_error!r}")
-        if "gmail" in (settings.smtp_host or "").lower():
-            print("For Gmail, PREP_SMTP_PASSWORD must be a 16-character App Password from "
-                  "https://myaccount.google.com/apppasswords (2-Step Verification must be on), not your normal password.")
-        return 1
-    except Exception as exc:  # network, TLS or relay errors
-        print(f"Sending failed: {exc!r}")
-        return 1
-    print(f"Sent a test email to {argv[0]} through {settings.smtp_host}:{settings.smtp_port}. "
-          "Check the inbox (and the spam folder).")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(_main(sys.argv[1:]))

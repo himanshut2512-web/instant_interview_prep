@@ -90,7 +90,7 @@ python3 -m venv .venv                # Windows: python -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 cp .env.example .env                 # Windows: copy .env.example .env  -> then add ANTHROPIC_API_KEY
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --reload-include .env --port 8000
 
 # 2. frontend (second terminal)
 cd frontend
@@ -141,39 +141,54 @@ third-party auth service to pay for:
 - **Your data**: each prep kit belongs to the account that created it. Kits made before accounts existed are given to
   the first account created.
 
-### Set up "Continue with Google" (free, about 5 minutes)
+### Turn on Google sign-in and password-reset email
 
-1. Open [Google Cloud Console](https://console.cloud.google.com/), create a project (or pick one).
-2. **APIs & Services → OAuth consent screen**: choose *External*, fill in the app name and support email, and keep
-   the default scopes (`openid`, `email`, `profile`). While the app is in *Testing*, only the test users you add can
-   sign in; click **Publish app** when you go live (these basic scopes need no Google review).
-3. **APIs & Services → Credentials → Create credentials → OAuth client ID**, type *Web application*. Under
-   **Authorized redirect URIs** add:
+Both are free, but they need credentials that only the site's owner can create: a Google OAuth client and an email
+account to send from. Until they are configured, the server says so in its log, a local install shows its owner a
+setup note on the sign-in page, and a live site (with `PREP_APP_URL` set) hides the Google button.
+
+**The quick way: the setup wizard.** It shows exactly what to click, checks each value live (it asks Google whether
+the client ID and secret are valid and sends you a real test email) and saves `backend/.env`, keeping a backup:
+
+```bash
+cd backend
+python -m app.setup_auth            # Windows: .venv\Scripts\python -m app.setup_auth
+python -m app.setup_auth --check    # later: re-check the saved settings (changes nothing, sends nothing)
+```
+
+Restart the backend afterwards (`scripts/dev.ps1` and `scripts/dev.sh` restart it automatically when `.env` changes).
+The server also checks both integrations every time it starts and logs the exact problem if something is wrong.
+
+**By hand: Continue with Google (about 5 minutes).**
+
+1. Open [Google Auth Platform → Clients](https://console.cloud.google.com/auth/clients) in Google Cloud and create a
+   project if asked. If the platform isn't configured yet, click **Get started**: app name, support email,
+   Audience *External*, contact email.
+2. **Create client** → type *Web application* → under **Authorized redirect URIs** add:
    - `http://localhost:5173/api/auth/google/callback` (development with `npm run dev`)
    - `http://localhost:8000/api/auth/google/callback` (the built app served by FastAPI)
    - `https://YOUR-DOMAIN/api/auth/google/callback` (production)
-4. Copy the client ID and secret into `backend/.env` as `PREP_GOOGLE_CLIENT_ID` and `PREP_GOOGLE_CLIENT_SECRET`,
-   then restart the backend.
+3. Copy the client ID and secret into `backend/.env` as `PREP_GOOGLE_CLIENT_ID` and `PREP_GOOGLE_CLIENT_SECRET`.
+4. **Audience**: while the app is in *Testing*, only the test users you add there can sign in; click **Publish app**
+   to open it to everyone (basic sign-in with `openid`, `email` and `profile` needs no Google review).
 
-### Set up password-reset email (free)
+**By hand: password-reset email.** Any SMTP provider works. The quickest free option is Gmail (about 500 emails a day):
 
-Any SMTP provider works. The quickest free option is Gmail (about 500 emails a day):
-
-1. Turn on 2-Step Verification for the Google account, then create an App Password at
-   <https://myaccount.google.com/apppasswords>.
+1. Turn on [2-Step Verification](https://myaccount.google.com/signinoptions/twosv), then create an App Password at
+   <https://myaccount.google.com/apppasswords> (your normal Gmail password won't work).
 2. In `backend/.env` set `PREP_SMTP_HOST=smtp.gmail.com`, `PREP_SMTP_USER=you@gmail.com`,
-   `PREP_SMTP_PASSWORD=<the 16-character app password>` and `PREP_SMTP_FROM="InstantInterviewPrep <you@gmail.com>"`.
-3. Check it: `cd backend && python -m app.mailer you@example.com` sends a test email and explains common errors.
+   `PREP_SMTP_PASSWORD=<the 16-letter app password>` and `PREP_SMTP_FROM="InstantInterviewPrep <you@gmail.com>"`.
+3. Send yourself a test: `python -m app.setup_auth --test-email you@gmail.com`.
 
 For a custom sender domain, Brevo's free plan (300 emails a day) works the same way with
-`PREP_SMTP_HOST=smtp-relay.brevo.com`. Without SMTP settings, reset links are written to the server log instead.
+`PREP_SMTP_HOST=smtp-relay.brevo.com`. Without SMTP settings, a local install prints reset links in the backend log.
 
 ### Production checklist
 
 - Set `PREP_APP_URL=https://your-domain` (reset links and the Google callback use it; cookies become HTTPS-only).
 - Serve the app over HTTPS behind your proxy and run uvicorn with `--proxy-headers`.
 - Add the production redirect URI to the Google OAuth client and publish the consent screen.
-- Configure SMTP and run the `python -m app.mailer` check once.
+- Run `python -m app.setup_auth --check` on the server: both lines should say OK.
 
 ## Configuration (`backend/.env`)
 
@@ -238,7 +253,8 @@ backend/
       demo.py               offline demo agent (knowledge base + heuristic profile and feedback)
     knowledge_base/         13 offline topics (revision notes + questions at three levels)
     auth.py, accounts.py    sign-up/sign-in, Google OAuth, password reset, sessions
-    mailer.py, ratelimit.py SMTP email (python -m app.mailer to test) and sign-in rate limits
+    mailer.py, ratelimit.py SMTP email and sign-in rate limits
+    setup_auth.py           python -m app.setup_auth: guided setup and live checks for Google + email
     parsing.py, storage.py, models.py, export.py, samples.py
   tests/                    pytest suite (API, accounts, units, AI pipeline with a fake Claude client)
 frontend/

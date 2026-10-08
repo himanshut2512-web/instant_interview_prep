@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from app.agent import research as research_module
 from app.agent.llm import ClaudeLLM
 from app.main import create_app
-from conftest import sample_form, signup, wait_for
+from conftest import FakeGoogle, sample_form, signup, wait_for
 
 
 def text_block(text):
@@ -176,7 +176,7 @@ def ai_setup(tmp_path, settings):
     def make(**fake_kwargs):
         fake = FakeClient(**fake_kwargs)
         ai_settings = dataclasses.replace(settings, anthropic_api_key="test-key", max_concurrency=4)
-        app = create_app(ai_settings, llm_factory=lambda s: ClaudeLLM(s, client=fake))
+        app = create_app(ai_settings, llm_factory=lambda s: ClaudeLLM(s, client=fake), google_exchange=FakeGoogle())
         test_client = TestClient(app)
         signup(test_client)
         return fake, test_client

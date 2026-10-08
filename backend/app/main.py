@@ -100,6 +100,25 @@ def create_app(
     def lock_for(session_id: str) -> asyncio.Lock:
         return locks.setdefault(session_id, asyncio.Lock())
 
+    async def check_sign_in_setup() -> None:
+        """Check the Google and SMTP credentials once at boot, so mistakes show up in the log
+        straight away instead of at a user's first sign-in or password reset."""
+        from .setup_auth import check_google, check_smtp
+
+        hint = "run `python -m app.setup_auth` in the backend folder to fix it"
+        if google_exchange is None and settings.google_enabled:
+            ok, message = await asyncio.to_thread(check_google, settings.google_client_id, settings.google_client_secret)
+            if ok:
+                log.info("Google sign-in check: %s", message)
+            else:
+                log.error("Google sign-in check failed: %s - %s", message, hint)
+        if isinstance(mailer, Mailer) and mailer.configured:
+            ok, message = await asyncio.to_thread(check_smtp, settings)
+            if ok:
+                log.info("Password-reset email check: %s", message)
+            else:
+                log.error("Password-reset email check failed: %s - %s", message, hint)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         interrupted = store.mark_interrupted()
@@ -108,14 +127,19 @@ def create_app(
         log.info("InstantInterviewPrep %s ready - mode: %s", __version__, "AI (Claude)" if llm else "offline demo")
         log.info(
             "Sign-in: email + password%s; password-reset email %s",
-            " + Google" if settings.google_enabled else " (Google not configured)",
+            " + Google" if settings.google_enabled else " (Google NOT configured)",
             "enabled" if mailer.configured else "NOT configured - reset links are written to this log",
         )
+        missing = [name for name, ready in (("Google sign-in", settings.google_enabled),
+                                            ("password-reset email", mailer.configured)) if not ready]
+        if missing:
+            log.warning("To turn on %s, run `python -m app.setup_auth` in the backend folder (free, about 5 minutes).",
+                        " and ".join(missing))
         if settings.google_client_id and not settings.google_client_secret:
             log.warning("PREP_GOOGLE_CLIENT_ID is set but PREP_GOOGLE_CLIENT_SECRET is not - Google sign-in is off.")
-        if mailer.configured and not settings.app_url:
-            log.warning("Set PREP_APP_URL to your public URL so password-reset links work outside localhost.")
+        setup_check = asyncio.create_task(check_sign_in_setup())
         yield
+        setup_check.cancel()
         for task in list(running.values()):
             task.cancel()
         store.close()

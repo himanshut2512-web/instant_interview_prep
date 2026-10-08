@@ -34,7 +34,7 @@ def test_everything_needs_a_signed_in_user(anon):
     assert anon.get("/api/sessions/abc/export.md").status_code == 401
     # public endpoints stay public
     assert anon.get("/api/health").status_code == 200
-    assert anon.get("/api/auth/config").json() == {"google_enabled": True, "email_delivery": True}
+    assert anon.get("/api/auth/config").json() == {"google_enabled": True, "email_delivery": True, "setup_hints": True}
 
 
 def test_register_login_logout(anon):
