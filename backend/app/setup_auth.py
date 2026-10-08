@@ -239,7 +239,14 @@ def _setup_email(s: Settings) -> dict[str, str]:
                 s, smtp_host=host, smtp_port=int(port), smtp_security=security,
                 smtp_user=user, smtp_password=password, smtp_from=sender,
             )
-        recipient = _ask("Send a test email to", candidate.smtp_user if EMAIL_RE.match(candidate.smtp_user or "") else "")
+        default_to = candidate.smtp_user if EMAIL_RE.match(candidate.smtp_user or "") else ""
+        while True:
+            recipient = _ask("Send a test email to (press Enter for the address shown)", default_to)
+            if recipient.lower() in ("y", "yes"):  # answered as if it were a yes/no question
+                recipient = default_to
+            if EMAIL_RE.match(recipient):
+                break
+            print("  Type an email address, or press Enter to use the one shown.")
         print("  Sending...")
         ok, message = check_smtp(candidate, send_to=recipient or None)
         print(f"  {'OK' if ok else 'Problem'}: {message}")
