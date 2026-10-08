@@ -1,0 +1,81 @@
+/* ================================================================= print */
+.print-page {
+  width: min(900px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 60px;
+}
+
+.print-page h2 {
+  margin-top: 1.6em;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--line);
+}
+
+.print-q {
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+@media print {
+  :root,
+  :root[data-theme="dark"] {
+    color-scheme: light;
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #f6f6f8;
+    --ink: #000000;
+    --ink-2: #333333;
+    --ink-3: #555555;
+    --line: #dddddd;
+    --shadow: none;
+    --shadow-sm: none;
+    --shadow-xs: none;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  .topbar,
+  .ws-side,
+  .ws-tabbar,
+  .ws-mobile-head,
+  .no-print,
+  .qtoolbar,
+  .qactions,
+  .toast-stack,
+  .footer {
+    display: none !important;
+  }
+
+  .ws,
+  .page,
+  .print-page {
+    display: block;
+    width: 100%;
+    padding: 0;
+  }
+
+  .card,
+  .qcard,
+  .print-q {
+    box-shadow: none;
+    break-inside: avoid;
+  }
+
+  .code-body {
+    max-height: none;
+  }
+
+  .code-body pre,
+  .code-body code {
+    white-space: pre-wrap;
+  }
+
+  .print-section {
+    break-before: page;
+  }
+}

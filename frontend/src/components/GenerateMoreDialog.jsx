@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
-import { LoaderCircle, WandSparkles, X } from 'lucide-react'
+import { useState } from 'react'
+import { CircleAlert, LoaderCircle, WandSparkles, X } from 'lucide-react'
+import Dialog from './Dialog.jsx'
+import { SegmentedTabs } from './Tabs.jsx'
 
 const SECTION_NOUN = {
   theory: 'theoretical questions',
@@ -16,16 +18,8 @@ export default function GenerateMoreDialog({ open, onClose, section, topics, aiM
   const [focus, setFocus] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-
-  useEffect(() => {
-    if (!open) return undefined
-    const onKey = (e) => e.key === 'Escape' && !busy && onClose()
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, busy, onClose])
-
-  if (!open) return null
   const isRevision = section === 'revision'
+  const close = () => !busy && onClose()
 
   const submit = async (e) => {
     e.preventDefault()
@@ -42,65 +36,65 @@ export default function GenerateMoreDialog({ open, onClose, section, topics, aiM
   }
 
   return (
-    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
-      <form className="dialog" role="dialog" aria-modal="true" aria-labelledby="gen-title" onSubmit={submit}>
-        <div className="spread" style={{ marginBottom: 6 }}>
-          <h2 id="gen-title" className="row" style={{ margin: 0 }}>
-            <WandSparkles size={19} className="icon-accent" />
+    <Dialog open={open} onClose={close} labelledBy="gen-title" dismissable={!busy}>
+      <form onSubmit={submit} data-section={section}>
+        <div className="dialog-head">
+          <h2 id="gen-title">
+            <span className="title-icon" aria-hidden="true">
+              <WandSparkles size={18} />
+            </span>
             {isRevision ? 'Add a revision topic' : `Generate more ${SECTION_NOUN[section]}`}
           </h2>
-          <button type="button" className="icon-btn" onClick={onClose} disabled={busy} aria-label="Close">
+          <button type="button" className="icon-btn sm" onClick={close} disabled={busy} aria-label="Close">
             <X size={16} />
           </button>
         </div>
-        <p className="muted" style={{ fontSize: '0.9rem' }}>
+        <p className="muted" style={{ fontSize: 14 }}>
           {aiMode
-            ? 'The agent writes fresh content tailored to your resume, JD and company research - without repeating what you already have.'
+            ? 'The agent writes fresh content tailored to your resume, JD and the company research, without repeating what you already have.'
             : 'Demo mode adds unused content from the built-in knowledge base. Add an API key for freshly generated questions.'}
         </p>
-        <div className="stack" style={{ gap: 14 }}>
+        <div className="stack" style={{ gap: 16, marginTop: 6 }}>
           {isRevision ? (
             <div className="field">
-              <label htmlFor="gen-topic">Topic</label>
+              <label className="label" htmlFor="gen-topic">
+                Topic
+              </label>
               <input
                 id="gen-topic"
                 className="input"
                 list="gen-topic-list"
                 value={topic}
-                placeholder="e.g. Kafka, Time-series forecasting, Power BI DAX"
+                placeholder="e.g. Kafka, time-series forecasting, Power BI DAX"
                 onChange={(e) => setTopic(e.target.value)}
+                data-autofocus
               />
               <datalist id="gen-topic-list">
                 {topics.map((t) => (
                   <option key={t} value={t} />
                 ))}
               </datalist>
-              <span className="hint">Leave empty to cover the next planned topic that has no notes yet.</span>
+              <span className="hint">Leave it empty to cover the next planned topic that has no notes yet.</span>
             </div>
           ) : (
             <>
               <div className="field">
                 <span className="label">How many</span>
-                <div className="segmented" role="radiogroup" aria-label="How many">
-                  {[3, 5, 10, 15].map((n) => (
-                    <button type="button" key={n} className={count === n ? 'on' : ''} aria-pressed={count === n} onClick={() => setCount(n)}>
-                      {n}
-                    </button>
-                  ))}
-                </div>
+                <SegmentedTabs ariaLabel="How many" value={count} onChange={setCount} options={[3, 5, 10, 15].map((n) => ({ value: n, label: String(n) }))} />
               </div>
               <div className="field">
                 <span className="label">Level</span>
-                <div className="segmented" role="radiogroup" aria-label="Level">
-                  {['mixed', 'beginner', 'intermediate', 'advanced'].map((l) => (
-                    <button type="button" key={l} className={level === l ? 'on' : ''} aria-pressed={level === l} onClick={() => setLevel(l)}>
-                      {l[0].toUpperCase() + l.slice(1)}
-                    </button>
-                  ))}
-                </div>
+                <SegmentedTabs
+                  ariaLabel="Level"
+                  value={level}
+                  onChange={setLevel}
+                  options={['mixed', 'beginner', 'intermediate', 'advanced'].map((l) => ({ value: l, label: l[0].toUpperCase() + l.slice(1) }))}
+                />
               </div>
               <div className="field">
-                <label htmlFor="gen-topic">Topic</label>
+                <label className="label" htmlFor="gen-topic">
+                  Topic
+                </label>
                 <select id="gen-topic" className="select" value={topic} onChange={(e) => setTopic(e.target.value)}>
                   <option value="">Any topic from the plan</option>
                   {topics.map((t) => (
@@ -112,7 +106,9 @@ export default function GenerateMoreDialog({ open, onClose, section, topics, aiM
               </div>
               {aiMode && (
                 <div className="field">
-                  <label htmlFor="gen-focus">Extra focus (optional)</label>
+                  <label className="label" htmlFor="gen-focus">
+                    Extra focus <span className="opt">(optional)</span>
+                  </label>
                   <input
                     id="gen-focus"
                     className="input"
@@ -125,18 +121,23 @@ export default function GenerateMoreDialog({ open, onClose, section, topics, aiM
               )}
             </>
           )}
-          {error && <div className="banner error">{error}</div>}
-          <div className="row" style={{ justifyContent: 'flex-end' }}>
-            <button type="button" className="btn" onClick={onClose} disabled={busy}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={busy}>
-              {busy ? <LoaderCircle size={16} className="spin" /> : <WandSparkles size={16} />}
-              {busy ? (aiMode ? 'Generating - up to a minute…' : 'Adding…') : 'Generate'}
-            </button>
-          </div>
+          {error && (
+            <div className="banner-note error">
+              <CircleAlert size={18} />
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
+        <div className="dialog-foot">
+          <button type="button" className="btn" onClick={close} disabled={busy}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-sec" disabled={busy}>
+            {busy ? <LoaderCircle size={16} className="spin" /> : <WandSparkles size={16} />}
+            {busy ? (aiMode ? 'Generating, up to a minute…' : 'Adding…') : 'Generate'}
+          </button>
         </div>
       </form>
-    </div>
+    </Dialog>
   )
 }

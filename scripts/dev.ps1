@@ -6,8 +6,9 @@ $Root = Split-Path -Parent $PSScriptRoot
 if (-not (Test-Path "$Root\backend\.venv")) {
     Write-Host "Creating Python virtual environment..."
     python -m venv "$Root\backend\.venv"
-    & "$Root\backend\.venv\Scripts\pip.exe" install -q -r "$Root\backend\requirements.txt"
 }
+# quick when nothing changed; picks up new dependencies after an update
+& "$Root\backend\.venv\Scripts\python.exe" -m pip install -q --disable-pip-version-check -r "$Root\backend\requirements.txt"
 if (-not (Test-Path "$Root\backend\.env")) {
     Copy-Item "$Root\backend\.env.example" "$Root\backend\.env"
     Write-Host "Created backend\.env - add ANTHROPIC_API_KEY there for AI mode (demo mode works without it)."
@@ -18,7 +19,7 @@ if (-not (Test-Path "$Root\frontend\node_modules")) {
 }
 
 $backend = Start-Process -PassThru -NoNewWindow -WorkingDirectory "$Root\backend" `
-    -FilePath "$Root\backend\.venv\Scripts\uvicorn.exe" -ArgumentList "app.main:app", "--reload", "--port", "8000"
+    -FilePath "$Root\backend\.venv\Scripts\uvicorn.exe" -ArgumentList "app.main:app", "--reload", "--reload-include", ".env", "--port", "8000"
 Write-Host "Backend: http://localhost:8000   Frontend: http://localhost:5173"
 try {
     Push-Location "$Root\frontend"

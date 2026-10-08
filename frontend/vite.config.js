@@ -10,7 +10,8 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: process.env.VITE_API_TARGET || 'http://localhost:8000',
-        changeOrigin: true,
+        // keep the browser's Host so Google sign-in returns through this dev server
+        changeOrigin: false,
       },
     },
   },

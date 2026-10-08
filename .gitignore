@@ -8,6 +8,7 @@ venv/
 
 # Local secrets & data
 .env
+.env.bak
 backend/data/
 
 # Node / frontend

@@ -3,14 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="AI agent that researches your target company and builds a complete interview prep kit from your resume and JD." />
-    <title>InstantInterviewPrep</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="AI agent that researches your target company and builds a complete interview prep kit from your resume and job description: crash notes, 50+ level-wise questions, scenarios and a scored quiz." />
+    <meta name="theme-color" content="#f5f6fa" />
+    <meta property="og:title" content="InstantInterviewPrep · AI interview research agent" />
+    <meta property="og:description" content="Know what they'll ask before you walk in. Personalised prep kits with model answers, scenarios and quizzes." />
+    <title>InstantInterviewPrep · AI interview prep agent</title>
     <script>
-      // apply the saved theme before first paint (avoids a light/dark flash)
+      // apply the saved (or system) theme before first paint to avoid a light/dark flash
       try {
         var t = localStorage.getItem('iip-theme')
-        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t
+        if (t !== 'light' && t !== 'dark') t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        document.documentElement.dataset.theme = t
+        if (t === 'dark') document.querySelector('meta[name="theme-color"]').setAttribute('content', '#090c17')
       } catch (e) {}
     </script>
   </head>

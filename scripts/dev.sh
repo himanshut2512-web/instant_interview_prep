@@ -7,8 +7,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [ ! -d "$ROOT/backend/.venv" ]; then
   echo "Creating Python virtual environment..."
   python3 -m venv "$ROOT/backend/.venv"
-  "$ROOT/backend/.venv/bin/pip" install -q -r "$ROOT/backend/requirements.txt"
 fi
+# quick when nothing changed; picks up new dependencies after an update
+"$ROOT/backend/.venv/bin/python" -m pip install -q --disable-pip-version-check -r "$ROOT/backend/requirements.txt"
 if [ ! -f "$ROOT/backend/.env" ]; then
   cp "$ROOT/backend/.env.example" "$ROOT/backend/.env"
   echo "Created backend/.env - add ANTHROPIC_API_KEY there for AI mode (demo mode works without it)."
@@ -18,7 +19,7 @@ if [ ! -d "$ROOT/frontend/node_modules" ]; then
   (cd "$ROOT/frontend" && npm install --no-fund --no-audit)
 fi
 
-(cd "$ROOT/backend" && .venv/bin/uvicorn app.main:app --reload --port 8000) &
+(cd "$ROOT/backend" && .venv/bin/uvicorn app.main:app --reload --reload-include .env --port 8000) &
 BACKEND_PID=$!
 trap 'kill $BACKEND_PID 2>/dev/null' EXIT
 

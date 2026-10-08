@@ -8,24 +8,29 @@ import re
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Callable, Literal
+from urllib.parse import urlsplit
 
 import anthropic
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import __version__
+from .accounts import AccountError, Accounts, PasswordServiceBusy
 from .agent import actions
 from .agent.llm import ClaudeLLM, LLMError
 from .agent.pipeline import friendly_error, run_session
 from .agent.plan import DEPTHS
 from .agent.progress import initial_progress
+from .auth import GoogleExchange, build_auth, google_code_exchange
 from .config import Settings, get_settings
 from .export import export_markdown
+from .mailer import Mailer
 from .models import ALL_SECTIONS, QUESTION_SECTIONS, dedupe, empty_result, result_counts
 from .parsing import UnsupportedFileError, extract_text, is_pdf
+from .ratelimit import RateLimiter
 from .samples import SAMPLE_INPUT
 from .storage import Store, utcnow
 
@@ -36,6 +41,7 @@ MAX_RESUME_CHARS = 60_000
 MAX_JD_CHARS = 40_000
 MAX_EXTRA_CHARS = 30_000
 MAX_QUIZ_ATTEMPTS = 50
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 # ----------------------------------------------------------------------------- bodies
@@ -78,9 +84,13 @@ class QuizAttemptBody(BaseModel):
 def create_app(
     settings: Settings | None = None,
     llm_factory: Callable[[Settings], ClaudeLLM] | None = None,
+    google_exchange: GoogleExchange | None = None,
+    mailer: Mailer | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     store = Store(settings.db_path)
+    accounts = Accounts(store, session_days=settings.session_days)
+    mailer = mailer or Mailer(settings)
     llm: ClaudeLLM | None = None
     if settings.ai_enabled:
         llm = (llm_factory or ClaudeLLM)(settings)
@@ -90,13 +100,46 @@ def create_app(
     def lock_for(session_id: str) -> asyncio.Lock:
         return locks.setdefault(session_id, asyncio.Lock())
 
+    async def check_sign_in_setup() -> None:
+        """Check the Google and SMTP credentials once at boot, so mistakes show up in the log
+        straight away instead of at a user's first sign-in or password reset."""
+        from .setup_auth import check_google, check_smtp
+
+        hint = "run `python -m app.setup_auth` in the backend folder to fix it"
+        if google_exchange is None and settings.google_enabled:
+            ok, message = await asyncio.to_thread(check_google, settings.google_client_id, settings.google_client_secret)
+            if ok:
+                log.info("Google sign-in check: %s", message)
+            else:
+                log.error("Google sign-in check failed: %s - %s", message, hint)
+        if isinstance(mailer, Mailer) and mailer.configured:
+            ok, message = await asyncio.to_thread(check_smtp, settings)
+            if ok:
+                log.info("Password-reset email check: %s", message)
+            else:
+                log.error("Password-reset email check failed: %s - %s", message, hint)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         interrupted = store.mark_interrupted()
         if interrupted:
             log.warning("Marked %d interrupted session(s) as failed", interrupted)
         log.info("InstantInterviewPrep %s ready - mode: %s", __version__, "AI (Claude)" if llm else "offline demo")
+        log.info(
+            "Sign-in: email + password%s; password-reset email %s",
+            " + Google" if settings.google_enabled else " (Google NOT configured)",
+            "enabled" if mailer.configured else "NOT configured - reset links are written to this log",
+        )
+        missing = [name for name, ready in (("Google sign-in", settings.google_enabled),
+                                            ("password-reset email", mailer.configured)) if not ready]
+        if missing:
+            log.warning("To turn on %s, run `python -m app.setup_auth` in the backend folder (free, about 5 minutes).",
+                        " and ".join(missing))
+        if settings.google_client_id and not settings.google_client_secret:
+            log.warning("PREP_GOOGLE_CLIENT_ID is set but PREP_GOOGLE_CLIENT_SECRET is not - Google sign-in is off.")
+        setup_check = asyncio.create_task(check_sign_in_setup())
         yield
+        setup_check.cancel()
         for task in list(running.values()):
             task.cancel()
         store.close()
@@ -108,9 +151,50 @@ def create_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_origins),
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    def origin_allowed(origin: str, request: Request) -> bool:
+        return (
+            origin in settings.cors_origins
+            or origin == settings.app_url
+            or urlsplit(origin).netloc == request.url.netloc
+        )
+
+    @app.middleware("http")
+    async def protect(request: Request, call_next):
+        # Cookies are SameSite=Lax; refusing state-changing API calls from foreign
+        # origins adds a second layer against cross-site request forgery.
+        origin = request.headers.get("origin")
+        if request.method not in SAFE_METHODS and request.url.path.startswith("/api/") and origin:
+            if not origin_allowed(origin, request):
+                return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        return response
+
+    @app.exception_handler(AccountError)
+    async def account_error(_: Request, exc: AccountError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc), "field": exc.field}, status_code=exc.status)
+
+    @app.exception_handler(PasswordServiceBusy)
+    async def password_busy(_: Request, exc: PasswordServiceBusy) -> JSONResponse:
+        log.error("Password hashing is short of memory: %s", exc)
+        return JSONResponse(
+            {"detail": "The server is busy right now. Nothing was changed - please try again in a few seconds."},
+            status_code=503,
+            headers={"Retry-After": "5"},
+        )
+
+    auth_router, current_user = build_auth(
+        settings, accounts, mailer, RateLimiter(), google_exchange or google_code_exchange(settings)
+    )
+    app.include_router(auth_router)
+    app.state.accounts = accounts
 
     def launch(session_id: str) -> None:
         task = asyncio.create_task(
@@ -119,15 +203,16 @@ def create_app(
         running[session_id] = task
         task.add_done_callback(lambda _t, sid=session_id: running.pop(sid, None))
 
-    def load(session_id: str) -> dict[str, Any]:
+    def load(session_id: str, user: dict[str, Any]) -> dict[str, Any]:
         session = store.get(session_id)
-        if session is None:
+        # another user's kit looks exactly like a missing one
+        if session is None or session.get("user_id") != user["id"]:
             raise HTTPException(404, "Prep kit not found.")
         return session
 
     def public(session: dict[str, Any]) -> dict[str, Any]:
         inputs = session.get("inputs") or {}
-        data = {k: v for k, v in session.items() if k != "inputs"}
+        data = {k: v for k, v in session.items() if k not in ("inputs", "user_id")}
         data["years_experience"] = data.pop("years", None)
         data["inputs"] = {
             "resume_filename": inputs.get("resume_filename", ""),
@@ -207,6 +292,7 @@ def create_app(
         resume_file: UploadFile | None = File(None),
         jd_file: UploadFile | None = File(None),
         extra_files: list[UploadFile] | None = File(None),
+        user: dict[str, Any] = Depends(current_user),
     ) -> dict[str, Any]:
         company = re.sub(r"\s+", " ", company).strip()
         role = re.sub(r"\s+", " ", role).strip()
@@ -246,6 +332,7 @@ def create_app(
         session_id = uuid.uuid4().hex[:12]
         store.create(
             session_id,
+            user_id=user["id"],
             status="queued",
             mode=run_mode,
             company=company,
@@ -271,27 +358,31 @@ def create_app(
         return {"id": session_id, "status": "queued", "mode": run_mode}
 
     @app.get("/api/sessions")
-    async def list_sessions() -> list[dict[str, Any]]:
-        rows = store.list()
+    async def list_sessions(user: dict[str, Any] = Depends(current_user)) -> list[dict[str, Any]]:
+        rows = store.list(user["id"])
         for row in rows:
             row["years_experience"] = row.pop("years", None)
             row["running"] = row["id"] in running
         return rows
 
     @app.get("/api/sessions/{session_id}")
-    async def get_session(session_id: str) -> dict[str, Any]:
-        return public(load(session_id))
+    async def get_session(session_id: str, user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+        return public(load(session_id, user))
 
     @app.get("/api/sessions/{session_id}/status")
-    async def get_status(session_id: str) -> dict[str, Any]:
-        session = store.get(session_id, columns=("status", "mode", "company", "role", "progress", "error", "warnings", "summary"))
-        if session is None:
+    async def get_status(session_id: str, user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+        session = store.get(
+            session_id,
+            columns=("user_id", "status", "mode", "company", "role", "progress", "error", "warnings", "summary"),
+        )
+        if session is None or session.pop("user_id", None) != user["id"]:
             raise HTTPException(404, "Prep kit not found.")
         session["running"] = session_id in running
         return session
 
     @app.delete("/api/sessions/{session_id}", status_code=204)
-    async def delete_session(session_id: str) -> Response:
+    async def delete_session(session_id: str, user: dict[str, Any] = Depends(current_user)) -> Response:
+        load(session_id, user)
         task = running.pop(session_id, None)
         if task is not None:
             task.cancel()
@@ -301,8 +392,8 @@ def create_app(
         return Response(status_code=204)
 
     @app.post("/api/sessions/{session_id}/retry")
-    async def retry_session(session_id: str) -> dict[str, Any]:
-        session = load(session_id)
+    async def retry_session(session_id: str, user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+        session = load(session_id, user)
         if session_id in running:
             raise HTTPException(409, "This prep kit is still being generated.")
         if session["mode"] == "ai" and llm is None:
@@ -324,9 +415,11 @@ def create_app(
         return llm if session.get("mode") == "ai" else None
 
     @app.post("/api/sessions/{session_id}/generate")
-    async def generate_more(session_id: str, body: GenerateBody) -> dict[str, Any]:
+    async def generate_more(
+        session_id: str, body: GenerateBody, user: dict[str, Any] = Depends(current_user)
+    ) -> dict[str, Any]:
         async with lock_for(session_id):
-            session = load(session_id)
+            session = load(session_id, user)
             result = require_ready(session)
             try:
                 items = await actions.generate_more(
@@ -343,7 +436,7 @@ def create_app(
             except (LLMError, anthropic.APIError) as exc:
                 raise HTTPException(502, friendly_error(exc, settings)) from exc
             # re-read: another request may have changed progress/quiz state meanwhile
-            fresh_session = load(session_id)
+            fresh_session = load(session_id, user)
             result = fresh_session.get("result") or result
             existing = result.setdefault(body.section, [])
             if body.section == "revision":
@@ -357,8 +450,10 @@ def create_app(
             return {"added": added, "counts": result_counts(result), "message": message}
 
     @app.post("/api/sessions/{session_id}/evaluate")
-    async def evaluate(session_id: str, body: EvaluateBody) -> dict[str, Any]:
-        session = load(session_id)
+    async def evaluate(
+        session_id: str, body: EvaluateBody, user: dict[str, Any] = Depends(current_user)
+    ) -> dict[str, Any]:
+        session = load(session_id, user)
         result = session.get("result") or {}
         item = actions.find_item(result, body.section, body.item_id)
         if item is None:
@@ -370,7 +465,7 @@ def create_app(
         except (LLMError, anthropic.APIError) as exc:
             raise HTTPException(502, friendly_error(exc, settings)) from exc
         async with lock_for(session_id):
-            state = load(session_id).get("user_state") or {}
+            state = load(session_id, user).get("user_state") or {}
             evaluations = state.setdefault("evaluations", {})
             previous = evaluations.get(body.item_id) or {}
             evaluations[body.item_id] = {
@@ -382,9 +477,11 @@ def create_app(
         return evaluation
 
     @app.put("/api/sessions/{session_id}/state")
-    async def update_state(session_id: str, body: StateBody) -> dict[str, Any]:
+    async def update_state(
+        session_id: str, body: StateBody, user: dict[str, Any] = Depends(current_user)
+    ) -> dict[str, Any]:
         async with lock_for(session_id):
-            state = load(session_id).get("user_state") or {}
+            state = load(session_id, user).get("user_state") or {}
             state.setdefault("items", {})
             state.setdefault("topics", {})
             if body.item_id:
@@ -401,11 +498,13 @@ def create_app(
             return state
 
     @app.post("/api/sessions/{session_id}/quiz-attempts", status_code=201)
-    async def add_quiz_attempt(session_id: str, body: QuizAttemptBody) -> list[dict[str, Any]]:
+    async def add_quiz_attempt(
+        session_id: str, body: QuizAttemptBody, user: dict[str, Any] = Depends(current_user)
+    ) -> list[dict[str, Any]]:
         if body.correct > body.total:
             raise HTTPException(422, "correct cannot exceed total.")
         async with lock_for(session_id):
-            attempts = load(session_id).get("quiz_attempts") or []
+            attempts = load(session_id, user).get("quiz_attempts") or []
             attempt = body.model_dump()
             attempt["id"] = uuid.uuid4().hex[:10]
             attempt["score_pct"] = round(100 * body.correct / body.total)
@@ -416,8 +515,8 @@ def create_app(
             return attempts
 
     @app.get("/api/sessions/{session_id}/export.md")
-    async def export(session_id: str) -> Response:
-        session = load(session_id)
+    async def export(session_id: str, user: dict[str, Any] = Depends(current_user)) -> Response:
+        session = load(session_id, user)
         markdown = export_markdown(session)
         slug = re.sub(r"[^a-z0-9]+", "-", f"{session['company']} {session.get('role') or ''}".lower()).strip("-")
         return Response(
