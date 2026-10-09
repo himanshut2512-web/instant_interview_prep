@@ -28,7 +28,9 @@ export default function Footer() {
           </div>
         </div>
         <div className="footer-bottom">
-          <span>© {new Date().getFullYear()} InstantInterviewPrep</span>
+          <span>
+            © {new Date().getFullYear()} InstantInterviewPrep · <a href="/privacy.html">Privacy</a>
+          </span>
           <span>Built with React, FastAPI and Claude</span>
         </div>
       </div>

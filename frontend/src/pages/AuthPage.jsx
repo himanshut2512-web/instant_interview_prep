@@ -956,7 +956,9 @@ export default function AuthPage({ view }) {
             Passwords are stored only as secure hashes, and your prep kits are private to your account.
           </p>
         </div>
-        <footer className="auth-footer">© {year} InstantInterviewPrep</footer>
+        <footer className="auth-footer">
+          © {year} InstantInterviewPrep · <a href="/privacy.html">Privacy</a>
+        </footer>
       </main>
     </div>
   )

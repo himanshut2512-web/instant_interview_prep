@@ -1,0 +1,54 @@
+# Production: the app behind Caddy, which serves HTTPS with a free certificate it
+# gets and renews by itself. All settings live in deploy/.env (see .env.example).
+#
+#   cd deploy && sudo docker compose up -d --build
+name: instantprep
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  app:
+    build:
+      context: ..
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PREP_DATA_DIR: /app/data
+      # Only Caddy can reach the app, so trust the visitor address it forwards
+      # (sign-in rate limits are per visitor, not per proxy).
+      FORWARDED_ALLOW_IPS: "*"
+    volumes:
+      - prep-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging: *logging
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    logging: *logging
+
+volumes:
+  prep-data: # users, sessions and prep kits (SQLite) + daily backups
+  caddy-data: # HTTPS certificates
+  caddy-config:

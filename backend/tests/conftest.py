@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 
 # Configure the environment before app.main (which builds a default app) is imported.
-# Never read the developer's backend/.env: it may hold real API keys and mail credentials.
+# Start from a clean slate: ignore PREP_* settings inherited from the shell, and never read the
+# developer's backend/.env (it may hold real API keys and mail credentials).
+for _name in [n for n in os.environ if n.startswith("PREP_")]:
+    del os.environ[_name]
 os.environ["PREP_ENV_FILE"] = ""
 _TMP = Path(tempfile.mkdtemp(prefix="prep-tests-"))
 os.environ["PREP_DATA_DIR"] = str(_TMP)

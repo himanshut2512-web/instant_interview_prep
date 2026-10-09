@@ -105,6 +105,11 @@ cd frontend && npm run build                      # produces frontend/dist
 cd ../backend && uvicorn app.main:app --port 8000 # serves the API and the app on http://localhost:8000
 ```
 
+### Deploy for free
+
+See [deploy/README.md](deploy/README.md): the whole app on Google Cloud's Always Free VM with a free DuckDNS name
+and automatic HTTPS, set up with one script.
+
 ### Docker
 
 ```bash

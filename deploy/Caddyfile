@@ -1,0 +1,10 @@
+# HTTPS front door. Caddy gets a free Let's Encrypt certificate for $DOMAIN
+# (ports 80 and 443 must be open) and renews it automatically.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:8000
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}
